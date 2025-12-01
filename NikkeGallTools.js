@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.0.1
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -43,6 +43,15 @@ function connectWS(gallogId) {
         }));
     };
 
+    setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: "ping",
+            }));
+            console.log("[WS] keepalive ping");
+        }
+    }, 1000 * 60 * 3);
+
     ws.onmessage = (msg) => {
         const data = JSON.parse(msg.data);
 
@@ -80,14 +89,19 @@ function connectWS(gallogId) {
             console.log(PERMABAN_EXEC_OBJ);
 
             //갤러리 설정
-
             appendBlockSetting2(data.data.var10);
         }
 
     };
 
-    ws.onclose = () => console.log("[WS] WS closed");
-    ws.onerror = (err) => console.log("[WS] WS error:", err);
+    ws.onclose = () => {
+        console.log("[WS] Closed — retrying in 3 seconds…");
+        setTimeout(connectWS, 3000);
+    };
+    ws.onerror = (err) => {
+        console.log("[WS] WS error:", err);
+        setTimeout(connectWS, 3000);
+    };
 }
 
 function getGallID(){
@@ -2079,9 +2093,10 @@ async function autoblock_module() {
     try {
         if (await GM.getValue('autoblock_on') == true && autoblock_enabled == true) {
             let savedsetting = await GM.getValue('autoblock_setting');
+            /*
             if (SETTING_VAR["appendAllGall"] != true && savedsetting.AUTOBLOCK_GALL != (new URL(location.href))?.searchParams?.get('id')) {
                 throw new Error('자동차단 적용 실패 : 갤러리 ID 미일치');
-            }
+            }*/
             let autoblock_prevReq = await GM.getValue('autoblock_prevTS');
             if (autoblock_prevReq == undefined || new Date().getTime() - autoblock_prevReq > 600000) {
                 if (savedsetting != null && get_cookie('ci_c') != null && $.getURLParam('id') != null && _GALLERY_TYPE_ != null && savedsetting.proxy_time != null && savedsetting.mobile_time != null && savedsetting.proxy_use != null && savedsetting.mobile_use != null && savedsetting.img_block_use != null && savedsetting.img_block_time != null && savedsetting.img_block != null && savedsetting.mobile_ips_use != null && savedsetting.mobile_ips_time != null) {
@@ -4067,6 +4082,7 @@ async function getMonitorData() {
 
             if(fastFuzzySpam(post_str)){
                 banModule_single("유사도차단", pid, null, 6, 1, 0);
+                post_addlist[i].classList.add('DCMOD_REDBG');
             }
 
             //협동작전 제목 검증
