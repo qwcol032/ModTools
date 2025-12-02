@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.4
+// @version      2.0.5
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -54,7 +54,7 @@ function connectWS() {
                 state: "off"
             }));
         }
-a
+
         if (keepAliveInterval) clearInterval(keepAliveInterval);
 
         keepAliveInterval = setInterval(() => {
