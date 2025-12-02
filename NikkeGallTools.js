@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.2
+// @version      2.0.3
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -4102,7 +4102,7 @@ async function getMonitorData() {
                 if(ip != null && ip.length > 2){
                     let cnt = await checkduppost2(post_str);
                     if(cnt>=3){
-                        banModule_single("순회", pid, null, 6, 1, 0);
+                        banModule_single("순회의심", pid, null, 1, 1, 0);
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
@@ -4115,7 +4115,7 @@ async function getMonitorData() {
                         if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
                             let cnt = await checkduppost2(post_str);
                             if(cnt>=3){
-                                banModule_single("순회", pid, null, 6, 1, 0);
+                                banModule_single("순회의심", pid, null, 1, 1, 0);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
                                 continue;
                             }
