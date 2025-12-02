@@ -26,45 +26,57 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let ws;
+
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
 let FUZZY_THRESHOLD;
 let td_cnt;
 
-function connectWS(gallogId) {
-
+let ws;
+let keepAliveInterval = null;
+let gallogId;
+function connectWS() {
     ws = new WebSocket("wss://tamper-ws2.qwcol03220.workers.dev/ws");
 
     ws.onopen = () => {
-        ws.send(JSON.stringify({
-            type: "identify",
-            id: gallogId,
-            state: "off"
-        }));
+
+        if(gallMonitorON){
+            ws.send(JSON.stringify({
+                type: "identify",
+                id: gallogId,
+                state: "on"
+            }));
+        }
+        else{
+            ws.send(JSON.stringify({
+                type: "identify",
+                id: gallogId,
+                state: "off"
+            }));
+        }
+
+        if (keepAliveInterval) clearInterval(keepAliveInterval);
+
+        keepAliveInterval = setInterval(() => {
+            console.log("[WS] keepAlive");
+            if (ws.readyState === WebSocket.OPEN) {
+                if(gallMonitorON){
+                    ws.send(JSON.stringify({
+                        type: "set_state",
+                        state: "on"
+                    }));
+                }
+                else{
+                    ws.send(JSON.stringify({
+                        type: "set_state",
+                        state: "off"
+                    }));
+                }
+            }
+        }, 1000 * 60 * 3);
     };
 
-    setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            if(gallMonitorON){
-                ws.send(JSON.stringify({
-                    type: "set_state",
-                    state: "on"
-                }));
-            }
-            else{
-                ws.send(JSON.stringify({
-                    type: "set_state",
-                    state: "off"
-                }));
-            }
 
-            ws.send(JSON.stringify({
-                type: "ping",
-            }));
-            console.log("[WS] keepalive ping");
-        }
-    }, 1000 * 60 * 3);
 
     ws.onmessage = (msg) => {
         const data = JSON.parse(msg.data);
@@ -136,9 +148,8 @@ function getGallID(){
     const match = onclickText.match(/gallog\.dcinside\.com\/([a-zA-Z0-9_]+)/);
 
     if (match && match[1]) {
-        const gallogId = match[1];
-        console.log(gallogId);
-        connectWS(gallogId);
+        gallogId = match[1];
+        connectWS();
     }
 }
 
