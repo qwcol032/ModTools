@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.1
+// @version      2.0.2
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,14 +26,15 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-
-
-const ws = new WebSocket("wss://tamper-ws2.qwcol03220.workers.dev/ws");
+let ws;
+let gallMonitorON = false;
 let FUZZY_BAN_LIST;
 let FUZZY_THRESHOLD;
 let td_cnt;
 
 function connectWS(gallogId) {
+
+    ws = new WebSocket("wss://tamper-ws2.qwcol03220.workers.dev/ws");
 
     ws.onopen = () => {
         ws.send(JSON.stringify({
@@ -45,6 +46,19 @@ function connectWS(gallogId) {
 
     setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
+            if(gallMonitorON){
+                ws.send(JSON.stringify({
+                    type: "set_state",
+                    state: "on"
+                }));
+            }
+            else{
+                ws.send(JSON.stringify({
+                    type: "set_state",
+                    state: "off"
+                }));
+            }
+
             ws.send(JSON.stringify({
                 type: "ping",
             }));
@@ -68,6 +82,8 @@ function connectWS(gallogId) {
             SETTING_VAR["autoblockAIpost"] = data.data.var4;
             SETTING_VAR["useAccVideoban"] = data.data.var5;
             SETTING_VAR["usePlasterban"] = data.data.var6;
+            SETTING_VAR["checkCircuitPost"] = data.data.var11;
+
 
             //유사도검증민감도
             FUZZY_THRESHOLD = data.data.var9;
@@ -86,10 +102,10 @@ function connectWS(gallogId) {
             v8list = v8list.filter(x => x.length > 0);
             PERMABAN_EXEC_OBJ.data=v8list;
             SETTING_VAR["useAutoPermaban"] = true;
-            console.log(PERMABAN_EXEC_OBJ);
 
             //갤러리 설정
             appendBlockSetting2(data.data.var10);
+
         }
 
     };
@@ -744,6 +760,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["jojakCount"] = 5;
     SETTING_VAR["jojakCut"] = 50;
     SETTING_VAR["checkAccBan"] = false;
+    SETTING_VAR["checkCircuitPost"] = false;
 
     await GM.setValue('SETTING', SETTING_VAR);
 }
@@ -777,6 +794,7 @@ await settingundefchecker("recCount", 5);
 await settingundefchecker("jojakCount", 5);
 await settingundefchecker("jojakCut", 50);
 await settingundefchecker("checkAccBan", false);
+await settingundefchecker("checkCircuitPost", false);
 
 //dcinside 04xx 30->31d fix
 if (SETTING_VAR["rBanHour"] == 720) {
@@ -3557,7 +3575,7 @@ async function gallViewAddButton(re) {
         }
     }
 }
-let gallMonitorON = false;
+
 function clearPostList() {
     let gallList = document.querySelector('table.gall_list');
     let posts_mustdel = gallList.querySelectorAll('tbody tr');
@@ -4074,15 +4092,36 @@ async function getMonitorData() {
             post_addlist[i].prepend(chkbox);
             target.prepend(post_addlist[i]);
 
-            //제목 유사도 검증
             let post_str = post_addlist[i].querySelector('td.gall_tit.ub-word').textContent.trim();
             let pid = post_addlist[i].getAttribute('data-no')
             let ip = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
             let id = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
 
-            if(fastFuzzySpam(post_str)){
-                banModule_single("유사도차단", pid, null, 6, 1, 0);
-                post_addlist[i].classList.add('DCMOD_REDBG');
+            //제목 순회 검사
+            if(SETTING_VAR["checkCircuitPost"]){
+                if(ip != null && ip.length > 2){
+                    let cnt = await checkduppost2(post_str);
+                    if(cnt>=3){
+                        banModule_single("순회", pid, null, 6, 1, 0);
+                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        continue;
+                    }
+                }
+                if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
+                    if (id_info[id] == undefined) {
+                        await checkTempAccount(id);
+                    }
+                    if (id_info[id] != undefined && id_info[id][0] != null) {
+                        if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                            let cnt = await checkduppost2(post_str);
+                            if(cnt>=3){
+                                banModule_single("순회", pid, null, 6, 1, 0);
+                                post_addlist[i].classList.add('DCMOD_REDBG');
+                                continue;
+                            }
+                        }
+                    }
+                }
             }
 
             //협동작전 제목 검증
@@ -4090,84 +4129,44 @@ async function getMonitorData() {
                 const matches = post_str.match(coop_Reg);
                 if(matches != null){
                     console.log(matches);
-                    if(pid != null){
-                        if(ip != null && ip.length > 2){
-                            banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
-                        }
-                        if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
-                            if (id_info[id] == undefined) {
-                                await checkTempAccount(id);
-                            }
-                            if (id_info[id] != undefined && id_info[id][0] != null) {
-                                if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                                    banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                                    post_addlist[i].classList.add('DCMOD_REDBG');
-                                }
-                                else{
-                                    let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
-                                    if(tag.includes('일반')){
-                                        let changeTag = [];
-                                        changeTag.push([pid,"Test",id]);
-                                        bulkMovePosts(changeTag,230);
-                                        post_addlist[i].classList.add('DCMOD_YELLOWBG');
-                                    }
-                                }
-                            }
-                        }
+                    if(ip != null && ip.length > 2){
+                        banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
+                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        continue;
                     }
-                }
-            }
-
-            //댓글0 이미지
-            if(SETTING_VAR["useCmtZeroImageban"]){
-
-                //이미지나 동영상이 있는 글인지 확인한다
-                //let datatype = post_addlist[i]?.getAttribute('data-type');
-                //if (['icon_pic', 'icon_movie'].includes(datatype)) {
-                if(true){
-
-                    //댓글이 0인지 확인한다
-                    let id = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
                     if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
                         if (id_info[id] == undefined) {
                             await checkTempAccount(id);
                         }
-                        if (id_info[id] != undefined && id_info[id][2]==0) {
-                            post_addlist[i].classList.add('DCMOD_YELLOWBG');
-
-                            /*
-                            if(id_info[id][0]>50){
+                        if (id_info[id] != undefined && id_info[id][0] != null) {
+                            if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                                banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
-                            }
-
-                            let pid = post_addlist[i].getAttribute('data-no');
-                            post_addlist[i].classList.add('DCMOD_REDBG');
-
-                            //이전에 차단한 대상과 동일하다면 삭제만
-                            if(prebanid == id){
-                                deleteModule_single(pid, null);
+                                continue;
                             }
                             else{
-                                //이전과 다른 대상이라면 차단
-                                prebanid = id;
-                                banModule_single("신문고 문의", pid, null, 6 , 1, 0);
-                            }*/
+                                let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
+                                if(tag.includes('일반')){
+                                    let changeTag = [];
+                                    changeTag.push([pid,"Test",id]);
+                                    bulkMovePosts(changeTag,230);
+                                    post_addlist[i].classList.add('DCMOD_YELLOWBG');
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
             }
 
+
+
             //도배감지기
             if(SETTING_VAR["usePlasterban"]){
-                //제목, 아이디, 글번호 추출
-                let id = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
-                let pid = post_addlist[i].getAttribute('data-no');
-                let post_str = post_addlist[i].querySelector('td.gall_tit.ub-word').textContent.trim();
-
                 if(preBanarr.includes(id)){
                     deleteModule_single(pid, null);
                     post_addlist[i].classList.add('DCMOD_REDBG');
+                    continue;
                 }
                 else{
                     if(preCheckarr[0]){
@@ -4198,6 +4197,9 @@ async function getMonitorData() {
                                     break;
                                 }
                             }
+                            if(cnt>=3){
+                                continue;
+                            }
                         }
                         else{
                             preCheckarr = [id, post_str]
@@ -4216,10 +4218,29 @@ async function getMonitorData() {
                     let pid = post_addlist[i].getAttribute('data-no')
                     banModule_single("디시AI", pid, null, 1, 1, 0);
                     post_addlist[i].classList.add('DCMOD_REDBG');
+                    continue;
                 }
             }
 
+            //제목 유사도 검증
+            if(fastFuzzySpam(post_str)){
+                banModule_single("유사도차단", pid, null, 6, 1, 0);
+                post_addlist[i].classList.add('DCMOD_REDBG');
+                continue;
+            }
 
+            //댓글0 이미지
+            if(SETTING_VAR["useCmtZeroImageban"]){
+                //댓글이 0인지 확인한다
+                if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
+                    if (id_info[id] == undefined) {
+                        await checkTempAccount(id);
+                    }
+                    if (id_info[id] != undefined && id_info[id][2]==0) {
+                        post_addlist[i].classList.add('DCMOD_YELLOWBG');
+                    }
+                }
+            }
         }
         process_ubwriter(true);
         getImageData();
@@ -6279,6 +6300,42 @@ async function checkduppost() {
         checkduppost_flag = false;
     }
 }
+
+async function checkduppost2(title) {
+    const encoded = stringtoutf8(title);
+    const resp = await gmRequestPromise({
+        method: "GET",
+        url: `https://search.dcinside.com/post/sort/latest/q/${encoded}`
+    });
+
+    const doc = new DOMParser().parseFromString(resp.responseText, "text/html");
+
+    const nodes = doc.querySelectorAll(".sch_result_list .tit_txt");
+
+    const normalize = (str) => {
+        return str
+            .normalize("NFKC")
+            .replace(/\s+/g, "")
+            .replace(/[^가-힣a-zA-Z]/g, "")
+            .toLowerCase();
+    };
+
+    const targetNorm = normalize(title);
+
+    let count = 0;
+
+    nodes.forEach(a => {
+        const foundTitle = a.textContent || "";
+        const foundNorm = normalize(foundTitle);
+
+        if (foundNorm === targetNorm) {
+            count++;
+        }
+    });
+
+    return count;
+}
+
 
 const STATIC_REGEX_DC_IMG_LINK = /^https:\/\/dcimg[0-9]+\.dcinside\.co(\.kr|m)\/viewimage\.php\?id=[a-z0-9]+&no=[a-z0-9]+$/;
 const STATIC_REGEX_DC_VIDIMG_LINK = /^https:\/\/gall\.dcinside\.com\/board\/movie\/movie_view\?no=([0-9]+)$/;
