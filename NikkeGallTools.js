@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.5
+// @version      2.0.6
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,9 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-
+let toolVersion = "2.0.6";
+let newVersion;
+let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
 let FUZZY_THRESHOLD;
@@ -44,14 +46,16 @@ function connectWS() {
             ws.send(JSON.stringify({
                 type: "identify",
                 id: gallogId,
-                state: "on"
+                state: "on",
+                version: toolVersion
             }));
         }
         else{
             ws.send(JSON.stringify({
                 type: "identify",
                 id: gallogId,
-                state: "off"
+                state: "off",
+                version: toolVersion
             }));
         }
 
@@ -83,7 +87,7 @@ function connectWS() {
 
         if (data.type === "on_count") {
             td_cnt = data.count;
-            document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+td_cnt+"대";
+            document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+td_cnt+"대 / 사드버전 "+toolVersion;
         }
 
         if (data.type === "config") {
@@ -95,7 +99,10 @@ function connectWS() {
             SETTING_VAR["useAccVideoban"] = data.data.var5;
             SETTING_VAR["usePlasterban"] = data.data.var6;
             SETTING_VAR["checkCircuitPost"] = data.data.var11;
-
+            if(toolVersion != data.data.var12 && flagAlert){
+                alert("경고!\n사드툴이 최신버전이 아닙니다\n이대로 모니터링을 돌리면 치명적인 결과가 발생할수있습니다\n현재버전 "+toolVersion+" / 최신버전 "+data.data.var12);
+                flagAlert = false;
+            }
 
             //유사도검증민감도
             FUZZY_THRESHOLD = data.data.var9;
@@ -154,8 +161,6 @@ function getGallID(){
 }
 
 getGallID();
-
-
 
 //레벤슈타인 검증
 function fastLevenshtein(a, b) {
@@ -6332,20 +6337,42 @@ async function checkduppost2(title) {
     };
 
     const targetNorm = normalize(title);
+    console.log(targetNorm);
+
+    let now = new Date();
 
     let count = 0;
+    for (const a of nodes) {
 
-    nodes.forEach(a => {
+        const li = a.closest("li");
+
+        const dateTime = li?.querySelector(".date_time")?.textContent.trim() || null;
+        if(!isToday(dateTime)) break;
+
+        const gallName = li?.querySelector(".sub_txt")?.textContent.trim() || null;
+        if(gallName=="니케") continue;
+
         const foundTitle = a.textContent || "";
         const foundNorm = normalize(foundTitle);
 
-        if (foundNorm === targetNorm) {
-            count++;
-        }
-    });
+        if (foundNorm === targetNorm) count++;
+    }
 
     return count;
 }
+
+function isToday(dateTimeStr) {
+    const [datePart] = dateTimeStr.split(" ");
+    const [y, m, d] = datePart.split(".").map(Number);
+
+    const now = new Date();
+    const todayY = now.getFullYear();
+    const todayM = now.getMonth() + 1;
+    const todayD = now.getDate();
+
+    return (y === todayY && m === todayM && d === todayD);
+}
+
 
 
 const STATIC_REGEX_DC_IMG_LINK = /^https:\/\/dcimg[0-9]+\.dcinside\.co(\.kr|m)\/viewimage\.php\?id=[a-z0-9]+&no=[a-z0-9]+$/;
