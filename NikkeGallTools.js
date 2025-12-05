@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.6
+// @version      2.0.7
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,10 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.0.6";
+// 2.0.7에서 유사도 차단 로직 변경됨
+// 모바일 댓글 모니터링 기능 추가됨
+// 사드 작동중 버전체크 X
+let toolVersion = "2.0.7";
 let newVersion;
 let flagAlert = true;
 let gallMonitorON = false;
@@ -99,7 +102,7 @@ function connectWS() {
             SETTING_VAR["useAccVideoban"] = data.data.var5;
             SETTING_VAR["usePlasterban"] = data.data.var6;
             SETTING_VAR["checkCircuitPost"] = data.data.var11;
-            if(toolVersion != data.data.var12 && flagAlert){
+            if(toolVersion != data.data.var12 && flagAlert && !gallMonitorON){
                 alert("경고!\n사드툴이 최신버전이 아닙니다\n이대로 모니터링을 돌리면 치명적인 결과가 발생할수있습니다\n현재버전 "+toolVersion+" / 최신버전 "+data.data.var12);
                 flagAlert = false;
             }
@@ -216,7 +219,7 @@ function consonantSimilarity(a, b) {
 
 //유사도 검증
 function fastFuzzySpam(raw) {
-    const text = raw.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣ]/g, "");
+    const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
     const consT = extractConsonants(text);
 
@@ -3983,7 +3986,7 @@ async function getMonitorData() {
         if (gallMonitorON == false || nodup == true) return;
         nodup = true;
         let target = document.querySelector('table.gall_list').querySelector('tbody');
-        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=.2520`, { credentials: 'include' });
+        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=-`, { credentials: 'include' });
         var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
         let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
 
