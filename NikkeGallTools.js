@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.7
+// @version      2.0.8
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,21 +26,17 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-// 2.0.7에서 유사도 차단 로직 변경됨
-// 모바일 댓글 모니터링 기능 추가됨
-// 사드 작동중 버전체크 X
-let toolVersion = "2.0.7";
-let newVersion;
+let toolVersion = "2.0.8";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
 let FUZZY_THRESHOLD;
-let td_cnt;
+let Writer_BAN_LIST;
+let Writer_THRESHOLD;
 
 let ws;
 let keepAliveInterval = null;
-let gallogId;
-function connectWS() {
+function connectWS(gallogId) {
     ws = new WebSocket("wss://tamper-ws2.qwcol03220.workers.dev/ws");
 
     ws.onopen = () => {
@@ -89,8 +85,7 @@ function connectWS() {
         const data = JSON.parse(msg.data);
 
         if (data.type === "on_count") {
-            td_cnt = data.count;
-            document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+td_cnt+"대 / 사드버전 "+toolVersion;
+            document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+data.count+"대 / 사드버전 "+toolVersion;
         }
 
         if (data.type === "config") {
@@ -103,19 +98,29 @@ function connectWS() {
             SETTING_VAR["usePlasterban"] = data.data.var6;
             SETTING_VAR["checkCircuitPost"] = data.data.var11;
             if(toolVersion != data.data.var12 && flagAlert && !gallMonitorON){
-                alert("경고!\n사드툴이 최신버전이 아닙니다\n이대로 모니터링을 돌리면 치명적인 결과가 발생할수있습니다\n현재버전 "+toolVersion+" / 최신버전 "+data.data.var12);
+                alert("경고!\n사드툴이 최신버전이 아닙니다\n이대로 사드를 돌리면 치명적인 결과가 발생할수있습니다\n현재버전 "+toolVersion+" / 최신버전 "+data.data.var12);
                 flagAlert = false;
             }
 
-            //유사도검증민감도
+            //제목유사도민감도
             FUZZY_THRESHOLD = data.data.var9;
 
-            //유사도검증리스트
+            //제목유사도리스트
             let v7raw = String(data.data.var7 ?? "");
             v7raw = v7raw.replace(/[ \t]+/g, "");
             let v7list = v7raw.split("\n");
             v7list = v7list.filter(x => x.length > 0);
             FUZZY_BAN_LIST = v7list;
+
+            //작성자유사도민감도
+            Writer_THRESHOLD = data.data.var13;
+
+            //작성자유사도리스트
+            let v14raw = String(data.data.var14 ?? "");
+            v14raw = v14raw.replace(/[ \t]+/g, "");
+            let v14list = v14raw.split("\n");
+            v14list = v14list.filter(x => x.length > 0);
+            Writer_BAN_LIST = v14list;
 
             //갱차리스트
             let v8raw = String(data.data.var8 ?? "");
@@ -134,11 +139,11 @@ function connectWS() {
 
     ws.onclose = () => {
         console.log("[WS] Closed — retrying in 3 seconds…");
-        setTimeout(connectWS, 3000);
+        setTimeout(connectWS(gallogId), 3000);
     };
     ws.onerror = (err) => {
         console.log("[WS] WS error:", err);
-        setTimeout(connectWS, 3000);
+        setTimeout(connectWS(gallogId), 3000);
     };
 }
 
@@ -158,12 +163,16 @@ function getGallID(){
     const match = onclickText.match(/gallog\.dcinside\.com\/([a-zA-Z0-9_]+)/);
 
     if (match && match[1]) {
-        gallogId = match[1];
-        connectWS();
+        connectWS(match[1]);
     }
 }
 
-getGallID();
+if(($.getURLParam('id')=='gov')){
+    getGallID();
+}
+else{
+    return;
+}
 
 //레벤슈타인 검증
 function fastLevenshtein(a, b) {
@@ -217,7 +226,7 @@ function consonantSimilarity(a, b) {
 }
 
 
-//유사도 검증
+//제목유사도 검증
 function fastFuzzySpam(raw) {
     const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
@@ -246,6 +255,31 @@ function fastFuzzySpam(raw) {
     return false;
 }
 
+//작성자유사도 검증
+function fastFuzzySpam2(text) {
+    console.log(text);
+    const consT = extractConsonants(text);
+
+    for (const p of Writer_BAN_LIST) {
+        //두글자 차이 이상은 비교안함
+        if (Math.abs(text.length - p.length) > 1) continue;
+
+        //자음 비교
+        const consP = extractConsonants(p);
+        const consSimilarity = consonantSimilarity(consT, consP);
+        if (consSimilarity < Writer_THRESHOLD) continue;
+
+        //레벤슈타인
+        const dist = fastLevenshtein(text, p);
+        const len = Math.max(text.length, p.length);
+        const sim = (len - dist) / len;
+
+        if (sim >= Writer_THRESHOLD) {
+            return true;
+        }
+    }
+    return false;
+}
 
 const beechu = [210,240];//비추미사용말머리
 const ggeulol = [2026377,3382660,3557853];//끌올
@@ -1012,10 +1046,60 @@ async function user_memo(target_id) {
     DCMOD_MEMO[target_id] = data;
     await GM.setValue('memo', DCMOD_MEMO);
     let udata = document.querySelector('#user_data_lyr');
+    console.log(udata);
     if (udata != null) {
         udata.parentNode.removeChild(udata);
     }
     process_ubwriter();
+}
+//메모 일괄등록
+async function user_memo2() {
+
+    const data = await multilinePrompt("등록형식 식별코드-메모내용");
+    if (!data) {
+        console.log("취소됨");
+        return;
+    }
+
+    const lines = data.split("\n");
+
+    const result = lines.map(line => {
+        const [id, memo] = line.split("-");
+        return { id, memo };
+    });
+
+    result.forEach(item => {
+        if(!DCMOD_MEMO[item.id] && item.id != null){
+            DCMOD_MEMO[item.id] = item.memo;
+        }
+    });
+
+    await GM.setValue('memo', DCMOD_MEMO);
+    process_ubwriter();
+}
+function multilinePrompt(message) {
+    return new Promise(resolve => {
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = `
+            <div style="position:fixed; top:0; left:0; right:0; bottom:0;
+                        background:#0008; display:flex; align-items:center; justify-content:center;">
+                <div style="background:white; padding:20px;">
+                    <p>${message}</p>
+                    <textarea id="mp" rows="10" cols="50"></textarea><br>
+                    <button id="ok">등록</button><br>
+                    <button id="cancel">취소</button>
+                </div>
+            </div>`;
+        document.body.appendChild(wrapper);
+        wrapper.querySelector("#ok").onclick = () => {
+            resolve(wrapper.querySelector("#mp").value);
+            wrapper.remove();
+        };
+        wrapper.querySelector("#cancel").onclick = () => {
+            resolve(wrapper.querySelector("#mp").value);
+            wrapper.remove();
+        };
+    });
 }
 async function user_memo_del(target_id) {
     if (target_id == null) { return; }
@@ -1169,6 +1253,11 @@ function addMenuObserver() {
                         memobtn.setAttribute('style', 'color: #fff; background-color: #669933; font-size: 12px;');
                         memobtn.onclick = () => user_memo(target_id);
                         node.querySelector('ul').appendChild(memobtn);
+                        let memobtn4 = document.createElement('li');
+                        memobtn4.innerHTML = '메모일괄등록';
+                        memobtn4.setAttribute('style', 'color: #fff; background-color: #669933; font-size: 12px;');
+                        memobtn4.onclick = () => user_memo2();
+                        node.querySelector('ul').appendChild(memobtn4);
                         let memobtn2 = document.createElement('li');
                         memobtn2.innerHTML = '메모삭제';
                         memobtn2.setAttribute('style', 'color: #fff; background-color: #669933; font-size: 12px;');
@@ -2604,7 +2693,7 @@ async function replyPuller() {
     try {
         document.querySelector('#DCMOD_TIANANMEN').setAttribute('style','background: #ff0000; color: #fff; border-color: #ff0000;');
         console.log(`${new Date().toLocaleString()} -- 페이지 요청됨`);
-        let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=.2520`, { credentials: 'include' });
+        let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=p`, { credentials: 'include' });
         var data = new DOMParser().parseFromString(await resp.text(), "text/html");
         let replies = data.querySelectorAll('table.gall_list > tbody > tr.search.search_comment');
         let ban_arr = [];
@@ -3986,21 +4075,9 @@ async function getMonitorData() {
         if (gallMonitorON == false || nodup == true) return;
         nodup = true;
         let target = document.querySelector('table.gall_list').querySelector('tbody');
-        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=-`, { credentials: 'include' });
+        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=p`, { credentials: 'include' });
         var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
         let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
-
-        //https댓글추가
-        /*
-        let spaceResp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=.2520`, { credentials: 'include' });
-        let spaceDoc = new DOMParser().parseFromString(await spaceResp.text(), "text/html");
-        let spaceResults = spaceDoc?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
-
-        let httpsResp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=https%3A%2F%2F`, { credentials: 'include' });
-        let httpsDoc = new DOMParser().parseFromString(await httpsResp.text(), "text/html");
-        let httpsResults = httpsDoc?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
-
-        let reply_tbldata = [...(spaceResults ?? []), ...(httpsResults ?? [])];*/
 
         let reply_addlist = [];
         let r_id_max = GMD_LATEST_REPLY;
@@ -4115,6 +4192,13 @@ async function getMonitorData() {
             let pid = post_addlist[i].getAttribute('data-no')
             let ip = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
             let id = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
+            let nick = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-nick');
+
+            if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
+                if (id_info[id] == undefined) {
+                    await checkTempAccount(id);
+                }
+            }
 
             //제목 순회 검사
             if(SETTING_VAR["checkCircuitPost"]){
@@ -4126,18 +4210,13 @@ async function getMonitorData() {
                         continue;
                     }
                 }
-                if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
-                    if (id_info[id] == undefined) {
-                        await checkTempAccount(id);
-                    }
-                    if (id_info[id] != undefined && id_info[id][0] != null) {
-                        if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                            let cnt = await checkduppost2(post_str);
-                            if(cnt>=3){
-                                banModule_single("순회의심", pid, null, 1, 1, 0);
-                                post_addlist[i].classList.add('DCMOD_REDBG');
-                                continue;
-                            }
+                if (id_info[id] != undefined && id_info[id][0] != null) {
+                    if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                        let cnt = await checkduppost2(post_str);
+                        if(cnt>=3){
+                            banModule_single("순회의심", pid, null, 1, 1, 0);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            continue;
                         }
                     }
                 }
@@ -4153,25 +4232,20 @@ async function getMonitorData() {
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
-                    if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
-                        if (id_info[id] == undefined) {
-                            await checkTempAccount(id);
+                    if (id != null && id_info[id][0] != null) {
+                        if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                            banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            continue;
                         }
-                        if (id_info[id] != undefined && id_info[id][0] != null) {
-                            if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                                banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                                post_addlist[i].classList.add('DCMOD_REDBG');
+                        else{
+                            let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
+                            if(tag.includes('일반')){
+                                let changeTag = [];
+                                changeTag.push([pid,"Test",id]);
+                                bulkMovePosts(changeTag,230);
+                                post_addlist[i].classList.add('DCMOD_YELLOWBG');
                                 continue;
-                            }
-                            else{
-                                let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
-                                if(tag.includes('일반')){
-                                    let changeTag = [];
-                                    changeTag.push([pid,"Test",id]);
-                                    bulkMovePosts(changeTag,230);
-                                    post_addlist[i].classList.add('DCMOD_YELLOWBG');
-                                    continue;
-                                }
                             }
                         }
                     }
@@ -4248,13 +4322,20 @@ async function getMonitorData() {
                 continue;
             }
 
+
+            //작성자 유사도 검증
+            if(id!=null && id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                if(fastFuzzySpam2(nick)){
+                    banModule_single("유사도차단", pid, null, 1, 1, 0);
+                    post_addlist[i].classList.add('DCMOD_REDBG');
+                    continue;
+                }
+            }
+
             //댓글0 이미지
             if(SETTING_VAR["useCmtZeroImageban"]){
                 //댓글이 0인지 확인한다
-                if(id != null && id.length>3 && GLOBAL_DC_NEWACC_REGEX.test(id) == true){
-                    if (id_info[id] == undefined) {
-                        await checkTempAccount(id);
-                    }
+                if(id != null){
                     if (id_info[id] != undefined && id_info[id][2]==0) {
                         post_addlist[i].classList.add('DCMOD_YELLOWBG');
                     }
@@ -4400,7 +4481,7 @@ async function searchIPorDD(isPostSearch) {//post search
             if (isPostSearch == true) {
                 target_url = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&list_num=100&sort_type=N&search_head=&page=${autosearch_num}`;
             } else {
-                target_url = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=.2520&page=${autosearch2_num}${(searchPos!=0)?'&search_pos='+String(searchPos):''}`;
+                target_url = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=p&page=${autosearch2_num}${(searchPos!=0)?'&search_pos='+String(searchPos):''}`;
             }
             let resp = await gmRequestPromise({
                 method:     "GET",
@@ -7558,6 +7639,10 @@ async function setGallKeyAdmin() {
     }
     setGallKeyAdmin_flag = false;
 }
+function pageLink(){
+    window.open("https://tamper-ws2.qwcol03220.workers.dev/panel", "_blank");
+}
+
 async function CHECK_REPLY_IP() {
     let replylist = Array.from(document.querySelectorAll('div.comment_box > ul.cmt_list li.ub-content:not(.dory)'));
     let check_elem = document.querySelector('#DCMOD_CHECK_REPLY_IP');
@@ -8524,6 +8609,9 @@ function makeModals(str, title, isYesNo, cbFunc, useGrayText) {
     document.body.appendChild(modalOverlay);
 }
 ///////////////////////////////////////////////////////////////////////////////////////
+
+
+
 insertCSS();
 if (urlMatch('/board/lists')) {
     addMenuObserver();
@@ -8554,9 +8642,10 @@ if (urlMatch('/board/lists')) {
     openSetting.innerHTML = '설정';
     openSetting.onclick = () => openSettingsPopup(openSetting);
     setting_div.appendChild(openSetting);
-    makebutton('모니터링', 'DCMOD_MONITORING_BTN', 'DCMOD_SETTING_BTN', toggleGallMonitoring, setting_div);
+    makebutton('사드', 'DCMOD_MONITORING_BTN', 'DCMOD_SETTING_BTN', toggleGallMonitoring, setting_div);
     makebutton('전체보기', 'DCMOD_MONITORING_BTN2', 'DCMOD_SETTING_BTN', toggleGallMonitoring2, setting_div);
     makebutton('키설정', 'DCMOD_MONITORING_BTN3', 'DCMOD_SETTING_BTN', setGallKeyAdmin, setting_div);
+    makebutton('사드관리', 'DCMOD_MONITORING_BTN4', 'DCMOD_SETTING_BTN', pageLink, setting_div);
     let mspan = document.createElement('span');
     mspan.setAttribute('id', "DCMOD_MONITORING_LASTDATATIME");
     setting_div.appendChild(mspan);
