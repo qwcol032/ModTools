@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.0.9
+// @version      2.1.0
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.0.9";
+let toolVersion = "2.1.0";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -88,6 +88,11 @@ function connectWS(gallogId) {
 
         if (data.type === "on_count") {
             document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+data.count+"대 / 사드버전 "+toolVersion;
+        }
+
+        if (data.type === "image_result"){
+            imageScan(data.post_no,data.result);
+            console.log("받았음");
         }
 
         if (data.type === "config") {
@@ -175,7 +180,7 @@ function getGallID(){
     }
 }
 
-if(($.getURLParam('id')=='gov')){
+if(($.getURLParam('id')=='gov')||true){
     getGallID();
 }
 else{
@@ -3823,11 +3828,10 @@ async function getImageData(cspan) {//not image only
     }
     for (let cur of mparse) {
         try {
-            if (Number(cur.getAttribute('retry-count')) >= 3) continue;//deleted?
+            if (Number(cur.getAttribute('retry-count')) >= 3) continue;
             if (gallMonitorON == false) break;
             let post_no = cur.getAttribute('data-must-parse');
             let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${$.getURLParam('id')}&no=${post_no}`, { credentials: 'include' });
-            if (gallMonitorON == false) break;
             var data = new DOMParser().parseFromString(await resp.text(), "text/html");
             if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) doIDBexec(data, post_no);
             let imgs = data.querySelectorAll('div.write_div img');
@@ -3845,11 +3849,13 @@ async function getImageData(cspan) {//not image only
                 pp.textContent = post_str;
                 td.appendChild(pp);
             }
-
             for (let curimg of imgs) {
                 curimg.removeAttribute('style');
                 curimg.removeAttribute('class');
                 td.appendChild(curimg);
+
+                //이미지 유사도 검증
+                //processImage(curimg,post_no);
             }
             for (let curvids1 of vids) {
                 if (curvids1.src.startsWith('https://gall.dcinside.com/board/movie/movie_view')) {
@@ -3864,33 +3870,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids2);
 
                     //깡계움짤밴
-                    if(SETTING_VAR["useAccVideoban"]){
-
-                        let monitoring_data_post = document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)');
-                        for (let i=0; i<monitoring_data_post.length; i++) {
-                            if(monitoring_data_post[i].getAttribute('data-no') == post_no){
-                                let ip = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
-                                let id = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
-                                if(post_no != null){
-                                    if(ip != null && ip.length > 2){
-                                        banModule_single("깡계움짤", post_no, null, 1, 1, 0);
-                                        monitoring_data_post[i].classList.add('DCMOD_REDBG');
-                                    }
-                                    if(id != null && id.length>3){
-                                        if (id_info[id] == undefined) {
-                                            await checkTempAccount(id);
-                                        }
-                                        if (id_info[id] != undefined && id_info[id][0] != null) {
-                                            if(id_info[id][0] < 100){
-                                                banModule_single("깡계움짤", post_no, null, 1, 1, 0);
-                                                monitoring_data_post[i].classList.add('DCMOD_REDBG');
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    processVideo(post_no);
                 }
             }
 
@@ -3901,51 +3881,9 @@ async function getImageData(cspan) {//not image only
             }
             //await sleep(1000);
 
+            //협동작전차단
+            processCoopText(post_str, post_no);
 
-            //협동작전 본문 검증
-            if(SETTING_VAR["useCoopBan"]){
-                if(post_str.length>5){
-                    const matches = post_str.match(coop_Reg);
-
-                    if(matches != null){
-                        console.log(matches);
-
-                        let monitoring_data_post = document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)');
-                        for (let i=0; i<monitoring_data_post.length; i++) {
-                            if(monitoring_data_post[i].getAttribute('data-no') == post_no){
-                                let ip = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
-                                let id = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
-                                if(post_no != null){
-                                    if(ip != null && ip.length > 2){
-                                        banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
-                                        monitoring_data_post[i].classList.add('DCMOD_REDBG');
-                                    }
-                                    if(id != null && id.length>3){
-                                        if (id_info[id] == undefined) {
-                                            await checkTempAccount(id);
-                                        }
-                                        if (id_info[id] != undefined && id_info[id][0] != null) {
-                                            if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                                                banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
-                                                monitoring_data_post[i].classList.add('DCMOD_REDBG');
-                                            }
-                                            else{
-                                                let tag = monitoring_data_post[i].querySelector('td.gall_subject').textContent.trim();
-                                                if(!tag.includes('협전')){
-                                                    let changeTag = [];
-                                                    changeTag.push([post_no,"Test",id]);
-                                                    bulkMovePosts(changeTag,230);
-                                                    monitoring_data_post[i].classList.add('DCMOD_YELLOWBG');
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         } catch(e) {
             if (e.message == 'Failed to fetch') {
                 cur.classList.add('must_parse');
@@ -3956,6 +3894,112 @@ async function getImageData(cspan) {//not image only
         }
     }
 }
+
+//이미지유사도차단
+async function processImage(imgEl, post_no) {
+    if (!imgEl || !imgEl.src) return;
+    if(ws == null) return;
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    if (!row) return;
+
+    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+
+    /*
+    if (id.length > 3) {
+        if (!id_info[id]) await checkTempAccount(id);
+        if (id_info[id]?.[0] > 100) return;
+    }*/
+
+    const url = imgEl.src;
+
+    ws.send(JSON.stringify({
+        type: "image_url",
+        url: url,
+        post_no: post_no
+    }));
+    console.log("보냈음");
+}
+
+async function imageScan(post_no, result) {
+    if(!result) return;
+
+    console.log(post_no+" 차단");
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    if(!row) return;
+
+    row.classList.add("DCMOD_REDBG");
+    //banModule_single("혐오이미지", post_no, null, 6, 1, 0);
+}
+
+//협동작전차단
+async function processCoopText(postText, post_no) {
+    if (!SETTING_VAR["useCoopBan"]) return;
+    if (postText.length < 5) return;
+
+    const matches = postText.match(coop_Reg);
+    if (!matches) return;
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    if (!row) return;
+
+    const ip = row.querySelector("td.ub-writer")?.getAttribute("data-ip") ?? "";
+    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+
+    // IP 기반 차단
+    if (ip.length > 2) {
+        banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+        row.classList.add("DCMOD_REDBG");
+        return;
+    }
+
+    // ID 기반 차단
+    if (id.length > 3) {
+        if (!id_info[id]) await checkTempAccount(id);
+
+        if (id_info[id]?.[0] < SETTING_VAR["checkAcc_cnt"]) {
+            banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+            row.classList.add("DCMOD_REDBG");
+        } else {
+            // 태그 변환
+            const tag = row.querySelector('td.gall_subject').textContent.trim();
+            if (!tag.includes("협전") && !row.classList.contains('DCMOD_YELLOWBG')) {
+                bulkMovePosts([[post_no, "Test", id]], 230);
+                row.classList.add("DCMOD_YELLOWBG");
+            }
+        }
+    }
+}
+
+//깡계움짤밴
+async function processVideo(post_no) {
+    if (!SETTING_VAR["useAccVideoban"]) return;
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    if (!row) return;
+
+    const ip = row.querySelector("td.ub-writer")?.getAttribute("data-ip") ?? "";
+    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+
+    let shouldBan = false;
+
+    // IP 기반 깡계 판정
+    if (ip.length > 2) shouldBan = true;
+
+    // ID 기반 깡계 판정
+    if (id.length > 3) {
+        if (!id_info[id]) await checkTempAccount(id);
+        if (id_info[id]?.[0] < 100) shouldBan = true;
+    }
+
+    if (shouldBan) {
+        banModule_single("깡계움짤", post_no, null, 1, 1, 0);
+        row.classList.add("DCMOD_REDBG");
+    }
+}
+
+
 
 let ipban_safety_stack = 0;
 function articleAndReplyBulkDeletor() {
@@ -4218,7 +4262,7 @@ async function getMonitorData() {
                     continue;
                 }
 
-                if (id === lastId || id === lastId2) {
+                if (id.length>2 && (id === lastId || id === lastId2)) {
                     lastId2 = lastId;
                     lastId = id;
                     const posts = Array.from(
@@ -6419,7 +6463,6 @@ async function checkduppost2(title) {
     };
 
     const targetNorm = normalize(title);
-    console.log(targetNorm);
 
     let now = new Date();
 
