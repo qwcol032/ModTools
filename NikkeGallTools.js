@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.0
+// @version      2.0.9
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.0";
+let toolVersion = "2.0.9";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -35,7 +35,6 @@ let FUZZY_THRESHOLD;
 let Writer_BAN_LIST;
 let Writer_BAN_LIST2=[];
 let Writer_THRESHOLD;
-let serverHashes;
 
 let ws;
 let keepAliveInterval = null;
@@ -130,10 +129,6 @@ function connectWS(gallogId) {
             for (const p of Writer_BAN_LIST) {
                 Writer_BAN_LIST2.push(extractConsonants(p));
             }
-
-            //이미지유사도리스트
-            const hashString = data.data.var15;
-            serverHashes = parseServerHashString(hashString);
 
             //갱차리스트
             let v8raw = String(data.data.var8 ?? "");
@@ -293,21 +288,6 @@ function fastFuzzySpam2(text) {
         }
     }
     return false;
-}
-
-//해쉬값 파싱
-function parseServerHashString(str) {
-    const lines = str.split(/\r?\n/).filter(v => v.trim().length > 0);
-
-    const result = [];
-
-    for (const line of lines) {
-        const [dh, ph] = line.split("|");
-        if (!dh || !ph) continue;
-
-        result.push({ dh, ph });
-    }
-    return result;
 }
 
 const beechu = [210,240];//비추미사용말머리
@@ -3843,10 +3823,11 @@ async function getImageData(cspan) {//not image only
     }
     for (let cur of mparse) {
         try {
-            if (Number(cur.getAttribute('retry-count')) >= 3) continue;
+            if (Number(cur.getAttribute('retry-count')) >= 3) continue;//deleted?
             if (gallMonitorON == false) break;
             let post_no = cur.getAttribute('data-must-parse');
             let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${$.getURLParam('id')}&no=${post_no}`, { credentials: 'include' });
+            if (gallMonitorON == false) break;
             var data = new DOMParser().parseFromString(await resp.text(), "text/html");
             if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) doIDBexec(data, post_no);
             let imgs = data.querySelectorAll('div.write_div img');
@@ -3864,13 +3845,11 @@ async function getImageData(cspan) {//not image only
                 pp.textContent = post_str;
                 td.appendChild(pp);
             }
+
             for (let curimg of imgs) {
                 curimg.removeAttribute('style');
                 curimg.removeAttribute('class');
                 td.appendChild(curimg);
-
-                //이미지 유사도 검증
-                processImage(curimg,post_no);
             }
             for (let curvids1 of vids) {
                 if (curvids1.src.startsWith('https://gall.dcinside.com/board/movie/movie_view')) {
@@ -3885,7 +3864,33 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids2);
 
                     //깡계움짤밴
-                    processVideo(post_no);
+                    if(SETTING_VAR["useAccVideoban"]){
+
+                        let monitoring_data_post = document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)');
+                        for (let i=0; i<monitoring_data_post.length; i++) {
+                            if(monitoring_data_post[i].getAttribute('data-no') == post_no){
+                                let ip = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
+                                let id = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
+                                if(post_no != null){
+                                    if(ip != null && ip.length > 2){
+                                        banModule_single("깡계움짤", post_no, null, 1, 1, 0);
+                                        monitoring_data_post[i].classList.add('DCMOD_REDBG');
+                                    }
+                                    if(id != null && id.length>3){
+                                        if (id_info[id] == undefined) {
+                                            await checkTempAccount(id);
+                                        }
+                                        if (id_info[id] != undefined && id_info[id][0] != null) {
+                                            if(id_info[id][0] < 100){
+                                                banModule_single("깡계움짤", post_no, null, 1, 1, 0);
+                                                monitoring_data_post[i].classList.add('DCMOD_REDBG');
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -3896,9 +3901,51 @@ async function getImageData(cspan) {//not image only
             }
             //await sleep(1000);
 
-            //협동작전차단
-            processCoopText(post_str, post_no);
 
+            //협동작전 본문 검증
+            if(SETTING_VAR["useCoopBan"]){
+                if(post_str.length>5){
+                    const matches = post_str.match(coop_Reg);
+
+                    if(matches != null){
+                        console.log(matches);
+
+                        let monitoring_data_post = document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)');
+                        for (let i=0; i<monitoring_data_post.length; i++) {
+                            if(monitoring_data_post[i].getAttribute('data-no') == post_no){
+                                let ip = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
+                                let id = monitoring_data_post[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
+                                if(post_no != null){
+                                    if(ip != null && ip.length > 2){
+                                        banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+                                        monitoring_data_post[i].classList.add('DCMOD_REDBG');
+                                    }
+                                    if(id != null && id.length>3){
+                                        if (id_info[id] == undefined) {
+                                            await checkTempAccount(id);
+                                        }
+                                        if (id_info[id] != undefined && id_info[id][0] != null) {
+                                            if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                                                banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+                                                monitoring_data_post[i].classList.add('DCMOD_REDBG');
+                                            }
+                                            else{
+                                                let tag = monitoring_data_post[i].querySelector('td.gall_subject').textContent.trim();
+                                                if(!tag.includes('협전')){
+                                                    let changeTag = [];
+                                                    changeTag.push([post_no,"Test",id]);
+                                                    bulkMovePosts(changeTag,230);
+                                                    monitoring_data_post[i].classList.add('DCMOD_YELLOWBG');
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } catch(e) {
             if (e.message == 'Failed to fetch') {
                 cur.classList.add('must_parse');
@@ -3907,217 +3954,6 @@ async function getImageData(cspan) {//not image only
                 console.log(e);
             }
         }
-    }
-}
-
-//이미지유사도차단
-async function processImage(imgEl, post_no) {
-    if (!imgEl || !imgEl.src) return;
-
-    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
-    if (!row) return;
-
-    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
-
-    if (id.length > 3) {
-        if (!id_info[id]) await checkTempAccount(id);
-        if (id_info[id]?.[0] > 100) return;
-    }
-
-    const url = imgEl.src;
-    const isBad = await imageScan(url);
-
-    if (isBad) {
-        banModule_single("혐오이미지", post_no, null, 744, 1, 1);
-    }
-}
-
-//협동작전차단
-async function processCoopText(postText, post_no) {
-    if (!SETTING_VAR["useCoopBan"]) return;
-    if (postText.length < 5) return;
-
-    const matches = postText.match(coop_Reg);
-    if (!matches) return;
-
-    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
-    if (!row) return;
-
-    const ip = row.querySelector("td.ub-writer")?.getAttribute("data-ip") ?? "";
-    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
-
-    // IP 기반 차단
-    if (ip.length > 2) {
-        banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
-        row.classList.add("DCMOD_REDBG");
-        return;
-    }
-
-    // ID 기반 차단
-    if (id.length > 3) {
-        if (!id_info[id]) await checkTempAccount(id);
-
-        if (id_info[id]?.[0] < SETTING_VAR["checkAcc_cnt"]) {
-            banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
-            row.classList.add("DCMOD_REDBG");
-        } else {
-            // 태그 변환
-            const tag = row.querySelector('td.gall_subject').textContent.trim();
-            if (!tag.includes("협전") && !row.classList.contains('DCMOD_YELLOWBG')) {
-                bulkMovePosts([[post_no, "Test", id]], 230);
-                row.classList.add("DCMOD_YELLOWBG");
-            }
-        }
-    }
-}
-
-//깡계움짤밴
-async function processVideo(post_no) {
-    if (!SETTING_VAR["useAccVideoban"]) return;
-
-    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
-    if (!row) return;
-
-    const ip = row.querySelector("td.ub-writer")?.getAttribute("data-ip") ?? "";
-    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
-
-    let shouldBan = false;
-
-    // IP 기반 깡계 판정
-    if (ip.length > 2) shouldBan = true;
-
-    // ID 기반 깡계 판정
-    if (id.length > 3) {
-        if (!id_info[id]) await checkTempAccount(id);
-        if (id_info[id]?.[0] < 100) shouldBan = true;
-    }
-
-    if (shouldBan) {
-        banModule_single("깡계움짤", post_no, null, 1, 1, 0);
-        row.classList.add("DCMOD_REDBG");
-    }
-}
-
-
-async function dHashFromUrl(img) {
-    const w = 9, h = 8;
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-
-    let hash = "";
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w - 1; x++) {
-            const idx = (y * w + x) * 4;
-            const idx2 = (y * w + x + 1) * 4;
-
-            const g1 = data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114;
-            const g2 = data[idx2] * 0.299 + data[idx2+1] * 0.587 + data[idx2+2] * 0.114;
-
-            hash += g1 > g2 ? "1" : "0";
-        }
-    }
-    return hash;
-}
-
-
-
-async function pHashFromUrl(img) {
-    const size = 32;
-    const smaller = 8;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-
-    ctx.drawImage(img, 0, 0, size, size);
-    const imgData = ctx.getImageData(0, 0, size, size).data;
-
-    let gray = new Float32Array(size * size);
-    for (let i = 0; i < size * size; i++) {
-        const p = i * 4;
-        gray[i] = imgData[p] * 0.299 + imgData[p+1] * 0.587 + imgData[p+2] * 0.114;
-    }
-
-    const N = size;
-    let dct = new Float32Array(N * N);
-
-    for (let u = 0; u < N; u++) {
-        for (let v = 0; v < N; v++) {
-
-            let sum = 0;
-            for (let x = 0; x < N; x++) {
-                for (let y = 0; y < N; y++) {
-                    sum += gray[x*N+y] *
-                        Math.cos(((2*x+1)*u*Math.PI)/(2*N)) *
-                        Math.cos(((2*y+1)*v*Math.PI)/(2*N));
-                }
-            }
-
-            let cu = u === 0 ? Math.SQRT1_2 : 1;
-            let cv = v === 0 ? Math.SQRT1_2 : 1;
-            dct[u*N+v] = 0.25 * cu * cv * sum;
-        }
-    }
-
-    const values = [];
-    for (let i = 0; i < smaller; i++) {
-        for (let j = 0; j < smaller; j++) {
-            values.push(dct[i*N+j]);
-        }
-    }
-
-    const avg = values.slice(1).reduce((a,b)=>a+b) / (values.length - 1);
-
-    let hash = "";
-    for (let v of values) hash += v > avg ? "1" : "0";
-
-    return hash;
-}
-
-function hamming(a, b) {
-    let dist = 0;
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) dist++;
-    }
-    return dist;
-}
-
-async function imageScan(url) {
-    try {
-        // 이미지 로드
-        const img = new Image();
-        img.crossOrigin = "Anonymous";
-        img.src = url;
-        await img.decode();
-
-        // 해시 계산
-        const dh = await dHashFromUrl(img);
-        const ph = await pHashFromUrl(img);
-
-        // 서버 해시와 비교
-        for (const item of serverHashes) {
-
-            // 1차 필터: dHash
-            if (hamming(dh, item.dh) < 12) {
-
-                // 2차 정밀: pHash
-                if (hamming(ph, item.ph) < 18) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-
-    } catch (e) {
-        console.error("imageScan error:", e);
-        return false;
     }
 }
 
@@ -6583,6 +6419,7 @@ async function checkduppost2(title) {
     };
 
     const targetNorm = normalize(title);
+    console.log(targetNorm);
 
     let now = new Date();
 
