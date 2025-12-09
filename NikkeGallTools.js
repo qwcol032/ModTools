@@ -180,7 +180,7 @@ function getGallID(){
     }
 }
 
-if(($.getURLParam('id')=='gov')||true){
+if(($.getURLParam('id')=='gov')){
     getGallID();
 }
 else{
