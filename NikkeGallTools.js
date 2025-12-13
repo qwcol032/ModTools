@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.0
+// @version      2.1.1
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.0";
+let toolVersion = "2.1.1";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -92,7 +92,6 @@ function connectWS(gallogId) {
 
         if (data.type === "image_result"){
             imageScan(data.post_no,data.result);
-            console.log("받았음");
         }
 
         if (data.type === "config") {
@@ -180,13 +179,13 @@ function getGallID(){
     }
 }
 
-if(($.getURLParam('id')=='gov')){
+
+if($.getURLParam('id')=='gov'){
     getGallID();
 }
 else{
-    return;
+	return;
 }
-
 //레벤슈타인 검증
 function fastLevenshtein(a, b) {
     const dp = Array(b.length + 1);
@@ -199,9 +198,9 @@ function fastLevenshtein(a, b) {
         for (let j = 1; j <= b.length; j++) {
             const temp = dp[j];
             dp[j] = Math.min(
-                dp[j] + 1,                // deletion
-                dp[j - 1] + 1,            // insertion
-                prev + (a[i - 1] === b[j - 1] ? 0 : 1) // replace
+                dp[j] + 1,
+                dp[j - 1] + 1,
+                prev + (a[i - 1] === b[j - 1] ? 0 : 1)
             );
             prev = temp;
         }
@@ -2701,6 +2700,9 @@ async function postPuller() {
     }
 }
 let RP_ON = false;
+
+
+
 async function replyPuller() {
     if (RP_ON == true) return;
     RP_ON = true;
@@ -2710,6 +2712,7 @@ async function replyPuller() {
         let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=p`, { credentials: 'include' });
         var data = new DOMParser().parseFromString(await resp.text(), "text/html");
         let replies = data.querySelectorAll('table.gall_list > tbody > tr.search.search_comment');
+
         let ban_arr = [];
         let current_reply_view = [];
         for (let cur of replies) {
@@ -3922,15 +3925,25 @@ async function processImage(imgEl, post_no) {
 }
 
 async function imageScan(post_no, result) {
+    console.log("result= " + result);
     if(!result) return;
 
-    console.log(post_no+" 차단");
+    if(result==1){
+        const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+        if(!row) return;
 
-    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
-    if(!row) return;
+        row.classList.add("DCMOD_REDBG");
+        //banModule_single("혐오이미지", post_no, null, 6, 1, 0);
+    }
 
-    row.classList.add("DCMOD_REDBG");
-    //banModule_single("혐오이미지", post_no, null, 6, 1, 0);
+    if(result == 0){
+        console.log("미차단");
+    }
+
+    if(result == -1){
+        console.log(post_no+" 에러");
+    }
+
 }
 
 //협동작전차단
@@ -3994,7 +4007,7 @@ async function processVideo(post_no) {
     }
 
     if (shouldBan) {
-        banModule_single("깡계움짤", post_no, null, 1, 1, 0);
+        banModule_single("혐오이미지", post_no, null, 1, 1, 0);
         row.classList.add("DCMOD_REDBG");
     }
 }
@@ -4116,15 +4129,20 @@ function articleAndReplyBulkDeletor() {
 
 const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![A-Za-z0-9])/g; //협동작전 정규식
 
+
+
 let lastId;
 let lastId2;
 let preBanarr = [];
+let ban_after_cnt;
 async function getMonitorData() {
     try {
         if (gallMonitorON == false || nodup == true) return;
         nodup = true;
         let target = document.querySelector('table.gall_list').querySelector('tbody');
-        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=p`, { credentials: 'include' });
+
+
+        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=%2520`, { credentials: 'include' });
         var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
         let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
 
@@ -4237,8 +4255,6 @@ async function getMonitorData() {
             post_addlist[i].prepend(chkbox);
             target.prepend(post_addlist[i]);
 
-
-
             let post_str = post_addlist[i].querySelector('td.gall_tit.ub-word').textContent.trim();
             let pid = post_addlist[i].getAttribute('data-no')
             let ip = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
@@ -4246,77 +4262,12 @@ async function getMonitorData() {
             let nick = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-nick');
             let date = post_addlist[i]?.querySelector('td.gall_date')?.getAttribute('title');
             date = date.slice(-5,-3);
+            if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
 
 
             if(id.length > 2){
                 if (id_info[id] == undefined) {
                     await checkTempAccount(id);
-                }
-            }
-
-            //도배감지기v2
-            if (SETTING_VAR["usePlasterban"]) {
-                if (preBanarr.includes(id)){
-                    deleteModule_single(pid);
-                    post_addlist[i].classList.add('DCMOD_REDBG');
-                    continue;
-                }
-
-                if (id.length>2 && (id === lastId || id === lastId2)) {
-                    lastId2 = lastId;
-                    lastId = id;
-                    const posts = Array.from(
-                        document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)')
-                    ).map(tr => ({
-                        el: tr,
-                        id: tr.querySelector('td.ub-writer')?.getAttribute('data-uid'),
-                        text: tr.querySelector('td.gall_tit.ub-word')?.textContent.trim(),
-                        pid: tr.getAttribute('data-no'),
-                        date: tr.querySelector('td.gall_date')?.getAttribute('title').slice(-5,-3)
-                    }));
-
-                    const duplicates = posts.filter(p => p.id === id && p.text === post_str);
-                    if (duplicates.length >= 3) {
-                        banModule_single("도배", pid, null, 744, 1, 1);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
-                        preBanarr.push(id);
-                        posts.slice(0, posts.length).forEach(p => {
-                            if (p.id === id && p.text === post_str && !p.el.classList.contains('DCMOD_REDBG')) {
-                                deleteModule_single(p.pid);
-                                p.el.classList.add('DCMOD_REDBG');
-                            }
-                        });
-                        continue;
-                    }
-
-                    const duplicates2 = posts.filter(p => p.id === id && p.date === date);
-                    if (duplicates2.length >= 3) {
-                        banModule_single("도배", pid, null, 744, 1, 1);
-                        preBanarr.push(id);
-                        posts.slice(0, posts.length).forEach(p => {
-                            if (p.id === id && p.date === date && !p.el.classList.contains('DCMOD_REDBG')) {
-                                deleteModule_single(p.pid);
-                                p.el.classList.add('DCMOD_REDBG');
-                            }
-                        });
-                        continue;
-                    }
-                }
-                else{
-                    lastId2 = lastId;
-                    lastId = id;
-                }
-            }
-
-            //제목 순회 검사
-            if(SETTING_VAR["checkCircuitPost"]){
-                if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                    let cnt = await checkduppost2(post_str);
-                    if(cnt>=3){
-                        banModule_single("순회의심", pid, null, 1, 1, 0);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
-                        continue;
-                    }
                 }
             }
 
@@ -4359,22 +4310,90 @@ async function getMonitorData() {
                 }
             }
 
-            //제목 유사도 검증
-            if(fastFuzzySpam(post_str)){
-                banModule_single("유사도차단", pid, null, 6, 1, 0);
-                post_addlist[i].classList.add('DCMOD_REDBG');
-                continue;
-            }
+            //제목검증시작
+            if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
 
+                //도배감지기v2
+                if (SETTING_VAR["usePlasterban"]) {
+                    if(ban_after_cnt == 0) preBanarr.length = 0;
+                    if (preBanarr.includes(id)){
+                        deleteModule_single(pid);
+                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        continue;
+                    }
 
-            //작성자 유사도 검증
-            if(id.legnth>2 && id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                    if (id.length>2){
+                        if (id === lastId || id === lastId2) {
+                            lastId2 = lastId;
+                            lastId = id;
+                            const posts = Array.from(
+                                document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)')
+                            ).map(tr => ({
+                                el: tr,
+                                id: tr.querySelector('td.ub-writer')?.getAttribute('data-uid'),
+                                text: tr.querySelector('td.gall_tit.ub-word')?.textContent.trim(),
+                                pid: tr.getAttribute('data-no'),
+                                date: tr.querySelector('td.gall_date')?.getAttribute('title').slice(-5,-3)
+                            }));
+
+                            const duplicates = posts.filter(p => p.id === id && p.text === post_str);
+                            if (duplicates.length >= 3) {
+                                banModule_single("도배", pid, null, 744, 1, 1);
+                                post_addlist[i].classList.add('DCMOD_REDBG');
+                                preBanarr.push(id);
+                                ban_after_cnt=10;
+                                posts.slice(0, posts.length).forEach(p => {
+                                    if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
+                                        deleteModule_single(p.pid);
+                                        p.el.classList.add('DCMOD_REDBG');
+                                    }
+                                });
+                                continue;
+                            }
+
+                            const duplicates2 = posts.filter(p => p.id === id && p.date === date);
+                            if (duplicates2.length >= 3) {
+                                banModule_single("도배", pid, null, 744, 1, 1);
+                                post_addlist[i].classList.add('DCMOD_REDBG');
+                                preBanarr.push(id);
+                                ban_after_cnt=10;
+                                posts.slice(0, posts.length).forEach(p => {
+                                    if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
+                                        deleteModule_single(p.pid);
+                                        p.el.classList.add('DCMOD_REDBG');
+                                    }
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                //제목 순회 검사
+                if(SETTING_VAR["checkCircuitPost"]){
+                    let cnt = await checkduppost2(post_str);
+                    if(cnt>=3){
+                        banModule_single("순회의심", pid, null, 1, 1, 0);
+                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        continue;
+                    }
+                }
+
+                //제목 유사도 검증
+                if(fastFuzzySpam(post_str)){
+                    banModule_single("유사도차단", pid, null, 6, 1, 0);
+                    post_addlist[i].classList.add('DCMOD_REDBG');
+                    continue;
+                }
+
+                //작성자 유사도 검증
                 if(fastFuzzySpam2(nick)){
                     banModule_single("유사도차단", pid, null, 1, 1, 0);
                     post_addlist[i].classList.add('DCMOD_REDBG');
                     continue;
                 }
             }
+            //제목검증 끝
 
             //댓글0 이미지
             if(SETTING_VAR["useCmtZeroImageban"]){
@@ -4382,6 +4401,9 @@ async function getMonitorData() {
                     if (id_info[id][2]==0) {
                         post_addlist[i].classList.add('DCMOD_YELLOWBG');
                     }
+                }
+                if(ip.length>2){
+                    post_addlist[i].classList.add('DCMOD_YELLOWBG');
                 }
             }
         }
