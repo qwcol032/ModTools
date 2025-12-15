@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.2
+// @version      2.1.3
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.2";
+let toolVersion = "2.1.3";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -193,12 +193,10 @@ function getGallID(){
 }
 
 
-if($.getURLParam('id')=='gov'){
-    getGallID();
+if($.getURLParam('id')!=='gov'){
+    return;
 }
-else{
-	return;
-}
+
 //레벤슈타인 검증
 function fastLevenshtein(a, b) {
     const dp = Array(b.length + 1);
@@ -251,8 +249,10 @@ function consonantSimilarity(a, b) {
 }
 
 
+
 //제목유사도 검증
 function fastFuzzySpam(raw) {
+    console.log(raw);
     const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
     const consT = extractConsonants(text);
@@ -265,7 +265,9 @@ function fastFuzzySpam(raw) {
 
         //자음 비교
         const consSimilarity = consonantSimilarity(consT, FUZZY_BAN_LIST2[i]);
-        if (consSimilarity < FUZZY_THRESHOLD) continue;
+        if (consSimilarity < FUZZY_THRESHOLD/1.5) continue;
+
+
 
         //레벤슈타인
         const dist = fastLevenshtein(text, p);
@@ -293,7 +295,7 @@ function fastFuzzySpam2(text) {
 
         //자음 비교
         const consSimilarity = consonantSimilarity(consT, Writer_BAN_LIST2[i]);
-        if (consSimilarity < Writer_THRESHOLD) continue;
+        if (consSimilarity < Writer_THRESHOLD/1.5) continue;
 
         //레벤슈타인
         const dist = fastLevenshtein(text, p);
@@ -3084,7 +3086,6 @@ function openSettingsPopup(elem) {
 
     document.body.appendChild(popupDiv);
     s_btn.addEventListener('click', async function() {
-        //let setting_checkacc_cnt = setting1[1].value;
         let setting_checkacc = setting2[1].innerHTML == 'YES' ? true : false;
         let setting_recheck = setting3[1].innerHTML == 'YES' ? true : false;
         let setting_showglobalban = setting4[1].innerHTML == 'YES' ? true : false;
@@ -3095,8 +3096,6 @@ function openSettingsPopup(elem) {
         let setting_appendAllGall = setting9[1].innerHTML == 'YES' ? true : false;
         let setting_popupBanHour = setting10[1].value;
         let setting_addGIFControl = setting11[1].innerHTML == 'YES' ? true : false;
-        //let setting_autoblockAIpostHour = setting12[1].value;
-        //let setting_useAutoPermaban = setting13[1].innerHTML == 'YES' ? true : false;
         let setting_disableWriterInfo = setting14[1].innerHTML == 'YES' ? true : false;
         let setting_popupIpBan = setting15[1].innerHTML == 'YES' ? true : false;
         let setting_useGlobalMemo = setting16[1].innerHTML == 'YES' ? true : false;
@@ -3106,15 +3105,8 @@ function openSettingsPopup(elem) {
             return;
         }
         let setting_useImgIDDecryptor = setting17[1].innerHTML == 'YES' ? true : false;
-        //let setting_useUidAutoPermaban = setting18[1].innerHTML == 'YES' ? true : false;
-        //let setting_useCoopBanHour = setting19[1].value;
-        //let setting_useCoopIpBan = setting20[1].innerHTML == 'YES' ? true : false;
         let setting_useCmtZeroImageban = setting21[1].innerHTML == 'YES' ? true : false;
-        //let setting_usePlasterban = setting22[1].innerHTML == 'YES' ? true : false;
-        //let setting_useSinmungoCmtAlert = setting23[1].value;
         let setting_useAccPostCmt = setting24[1].innerHTML == 'YES' ? true : false;
-        //let setting_useAccVideoban = setting25[1].innerHTML == 'YES' ? true : false;
-
         let setting_useRegEx = setting26[1].innerHTML == 'YES' ? true : false;
         let setting_recCount = setting27[1].value;
         let setting_jojakCount = setting28[1].value;
@@ -3122,16 +3114,14 @@ function openSettingsPopup(elem) {
         let setting_recNormalCount = setting30[1].value;
         let setting_recFixCount = setting31[1].value;
         let setting_checkAccBan = setting32[1].innerHTML == 'YES' ? true : false;
-        //let setting_useWordBypassBan = setting33[1].value;
         if (BAN_VALID_TIMES.includes(Number(setting_rBanHour)) == false) {
             setting_rBanHour = NaN;
         }
         if (BAN_VALID_TIMES.includes(Number(setting_popupBanHour)) == false && Number(setting_popupBanHour) != 0) {
             setting_popupBanHour = NaN;
         }
-        if (!isNaN(setting_checkacc_cnt) && !isNaN(setting_rBanHour) && !isNaN(setting_popupBanHour) && !isNaN(setting_autoblockAIpostHour)) {
+        if (true) {
             SETTING_VAR["checkAcc"] = setting_checkacc;
-            //SETTING_VAR["checkAcc_cnt"] = setting_checkacc_cnt;
             SETTING_VAR["checkAcc_recheck"] = setting_recheck;
             SETTING_VAR["showglobalban"] = setting_showglobalban;
             SETTING_VAR["checkAcc_newAccBold"] = setting_setNewAccBold;
@@ -3141,21 +3131,12 @@ function openSettingsPopup(elem) {
             SETTING_VAR["popupBanHour"] = setting_popupBanHour;
             SETTING_VAR["appendAllGall"] = setting_appendAllGall;
             SETTING_VAR["addGIFControl"] = setting_addGIFControl;
-            //SETTING_VAR["autoblockAIpostHour"] = setting_autoblockAIpostHour;
-            //SETTING_VAR["useAutoPermaban"] = setting_useAutoPermaban;
             SETTING_VAR["disableWriterInfo"] = setting_disableWriterInfo;
             SETTING_VAR["popupIpBan"] = setting_popupIpBan;
             SETTING_VAR["useGlobalMemo"] = setting_useGlobalMemo;
             SETTING_VAR["useImgIDDecryptor"] = setting_useImgIDDecryptor;
-            //SETTING_VAR["useUidAutoPermaban"] = setting_useUidAutoPermaban;
-            //SETTING_VAR["useCoopBanHour"] = setting_useCoopBanHour;
-            //SETTING_VAR["useCoopIpBan"] = setting_useCoopIpBan;
             SETTING_VAR["useCmtZeroImageban"] = setting_useCmtZeroImageban;
-            //SETTING_VAR["usePlasterban"] = setting_usePlasterban;
-            //SETTING_VAR["useSinmungoCmtAlert"] = setting_useSinmungoCmtAlert;
             SETTING_VAR["useAccPostCmt"] = setting_useAccPostCmt;
-            //SETTING_VAR["useAccVideoban"] = setting_useAccVideoban;
-
             SETTING_VAR["useRegEx"] = setting_useRegEx;
             SETTING_VAR["recCount"] = setting_recCount;
             SETTING_VAR["jojakCount"] = setting_jojakCount;
@@ -3163,8 +3144,6 @@ function openSettingsPopup(elem) {
             SETTING_VAR["recNormalCount"] = setting_recNormalCount;
             SETTING_VAR["recFixCount"] = setting_recFixCount;
             SETTING_VAR["checkAccBan"] = setting_checkAccBan;
-            //SETTING_VAR["useWordBypassBan"] = setting_useWordBypassBan;
-
             await GM.setValue('SETTING', SETTING_VAR);
             closeSettingsPopup();
             process_ubwriter();
@@ -3728,10 +3707,7 @@ async function toggleGallMonitoring() {
     if (gallMonitorON == false) {
         gallMonitorON = true;
 
-        ws.send(JSON.stringify({
-            type: "set_state",
-            state: "on"
-        }));
+        getGallID();
 
         clearPostList();
         /*
@@ -3866,12 +3842,29 @@ async function getImageData(cspan) {//not image only
                 td.appendChild(pp);
             }
             for (let curimg of imgs) {
-                curimg.removeAttribute('style');
-                curimg.removeAttribute('class');
-                td.appendChild(curimg);
 
-                //이미지 유사도 검증
-                processImage(curimg,post_no);
+                const img = curimg.cloneNode(true);
+                const realSrc = img.getAttribute("data-original")
+                || img.getAttribute("data-src");
+
+                img.removeAttribute("style");
+                img.removeAttribute("class");
+                img.removeAttribute("onclick");
+                img.removeAttribute("onerror");
+                img.removeAttribute("onmousedown");
+
+                if (realSrc && /gallview_loading_ori\.gif/.test(img.getAttribute("src") || "")) {
+                    img.src = realSrc;
+                } else if (realSrc && !img.getAttribute("src")) {
+                    img.src = realSrc;
+                }
+
+                img.removeAttribute("data-original");
+                img.removeAttribute("data-src");
+                td.appendChild(img);
+
+                // 이미지 유사도 검증
+                processImage(img, post_no);
             }
             for (let curvids1 of vids) {
                 if (curvids1.src.startsWith('https://gall.dcinside.com/board/movie/movie_view')) {
@@ -3937,6 +3930,7 @@ async function processImage(imgEl, post_no) {
     } catch {
       dh = "";
     }
+    console.log(dh);
 
     if (dh && Image_BAN_LIST.length) {
         for (const bdh of Image_BAN_LIST) {
