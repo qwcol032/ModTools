@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.3
+// @version      2.1.4
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -12,7 +12,8 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
-
+// @require      https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js
+// @require      https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1
 // ==/UserScript==
 /*-----------------------------------------------------------------
 DBAD license / Copyright (C) 2025 ZENITH(int64)
@@ -26,7 +27,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.3";
+let toolVersion = "2.1.4";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -35,8 +36,10 @@ let FUZZY_THRESHOLD;
 let Writer_BAN_LIST;
 let Writer_BAN_LIST2=[];
 let Writer_THRESHOLD;
-let Image_BAN_LIST;
-let Image_THRESHOLD;
+let Image_BAN_LIST = [];
+let Image_BAN_EMB_B64 = [];
+let Image_THRESHOLD = 100;
+let EMB_COSINE_THRESHOLD;
 
 
 let ws;
@@ -106,7 +109,7 @@ function connectWS(gallogId) {
             SETTING_VAR["useAccVideoban"] = data.data.var5;
             SETTING_VAR["usePlasterban"] = data.data.var6;
             SETTING_VAR["checkCircuitPost"] = data.data.var11;
-            if(toolVersion != data.data.var12 && flagAlert && !gallMonitorON){
+            if(toolVersion != data.data.var12 && flagAlert){
                 alert("경고!\n사드툴이 최신버전이 아닙니다\n이대로 사드를 돌리면 치명적인 결과가 발생할수있습니다\n현재버전 "+toolVersion+" / 최신버전 "+data.data.var12);
                 flagAlert = false;
             }
@@ -139,11 +142,12 @@ function connectWS(gallogId) {
 
             //이미지유사도리스트
             let v15raw = String(data.data.var15 ?? "");
-            v15raw = v15raw.replace(/[ \t]+/g, "");
-            let v15list = v15raw.split("\n");
-            v15list = v15list.filter(x => x.length > 0);
-            Image_BAN_LIST = v15list;
+            const parsed = parseVar15(v15raw);
+            Image_BAN_LIST = parsed.hashes;
+            Image_BAN_EMB_B64 = parsed.embB64s;
             Image_THRESHOLD = data.data.var17;
+            EMB_COSINE_THRESHOLD = data.data.var18;
+
 
 
             //갱차리스트
@@ -172,7 +176,32 @@ function connectWS(gallogId) {
     };
 }
 
-function getGallID(){
+function parseVar15(v15raw) {
+  v15raw = String(v15raw ?? "").replace(/\r/g, "");
+  v15raw = v15raw.replace(/[ \t]+/g, "");
+
+  const lines = v15raw.split("\n").map(s => s.trim()).filter(Boolean);
+
+  const hashes = [];
+  const embB64s = [];
+
+  for (const line of lines) {
+
+    const parts = line.split("|");
+    const hash = (parts[0] || "").toLowerCase();
+
+    if (!/^[0-9a-f]{16}$/.test(hash)) continue;
+
+    const b64 = parts[1] ? String(parts[1]).trim() : null;
+
+    hashes.push(hash);
+    embB64s.push(b64 && b64.length > 0 ? b64 : null);
+  }
+
+  return { hashes, embB64s };
+}
+
+function startWebsocket(){
 
     const infoArea = document.querySelector(".user_info.newarea");
     if (!infoArea) {
@@ -252,7 +281,6 @@ function consonantSimilarity(a, b) {
 
 //제목유사도 검증
 function fastFuzzySpam(raw) {
-    console.log(raw);
     const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
     const consT = extractConsonants(text);
@@ -266,8 +294,6 @@ function fastFuzzySpam(raw) {
         //자음 비교
         const consSimilarity = consonantSimilarity(consT, FUZZY_BAN_LIST2[i]);
         if (consSimilarity < FUZZY_THRESHOLD/1.5) continue;
-
-
 
         //레벤슈타인
         const dist = fastLevenshtein(text, p);
@@ -3707,7 +3733,7 @@ async function toggleGallMonitoring() {
     if (gallMonitorON == false) {
         gallMonitorON = true;
 
-        getGallID();
+        startWebsocket();
 
         clearPostList();
         /*
@@ -3811,7 +3837,6 @@ function iframeResizer(frameElem) {
     frameElem.setAttribute('style', `width:${vidsSize.width}px; height:${vidsSize.height}px;`);
 }
 
-
 const postdata_observer = new IntersectionObserver(postdata_observer_callback);
 async function getImageData(cspan) {//not image only
     let mparse = document.querySelectorAll('tr.must_parse');
@@ -3890,7 +3915,7 @@ async function getImageData(cspan) {//not image only
             }
             //await sleep(1000);
 
-            //협동작전차단
+            //협동작전 본문 차단
             processCoopText(post_str, post_no);
 
         } catch(e) {
@@ -3904,7 +3929,34 @@ async function getImageData(cspan) {//not image only
     }
 }
 
-//이미지유사도차단
+//이미지 유사도 차단
+const BROWN_EMBED_THRESHOLD = 0.1;
+const EMB_CACHE = new Map();
+let _mbModel = null;
+let _tfReady = false;
+
+async function ensureEmbedderReady() {
+    if (_mbModel) return _mbModel;
+
+    if (!_tfReady && window.tf?.ready) {
+        _tfReady = true;
+        try { await tf.setBackend("webgl"); } catch {}
+        await tf.ready();
+    }
+
+
+    const MODEL_URL =
+          "https://storage.googleapis.com/tfjs-models/savedmodel/mobilenet_v2_1.0_224/model.json";
+
+    _mbModel = await mobilenet.load({
+        version: 2,
+        alpha: 1.0,
+        modelUrl: MODEL_URL,
+    });
+
+    return _mbModel;
+}
+
 async function processImage(imgEl, post_no) {
     if (!imgEl || !imgEl.src) return;
 
@@ -3912,6 +3964,10 @@ async function processImage(imgEl, post_no) {
     if (!row) return;
 
     const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+    if(row.classList.contains('DCMOD_REDBG')) return;
+
+
+
     if (id.length > 3) {
         if (!id_info[id]) await checkTempAccount(id);
         if (id_info[id]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
@@ -3922,27 +3978,47 @@ async function processImage(imgEl, post_no) {
 
     const ab = await gmGetArrayBuffer(url);
 
+
+
+    let bmp = null;
     let dh = "";
     try {
-      const bmp = await arrayBufferToBitmap(ab);
-      dh = dHashHexFromBitmap(bmp);
-      if (bmp.close) bmp.close();
-    } catch {
-      dh = "";
-    }
-    console.log(dh);
+        bmp = await arrayBufferToBitmap(ab);
 
-    if (dh && Image_BAN_LIST.length) {
-        for (const bdh of Image_BAN_LIST) {
-            if (!bdh) continue;
-            const dist = hamming64Hex(dh, bdh);
-            if (dist <= Image_THRESHOLD) {
-                banModule_single("신문고 문의(ㅅ)", post_no, null, 744, 1, 1);
-                row.classList.add("DCMOD_REDBG");
+        dh = dHashHexFromBitmap(bmp);
+
+        if (dh && Image_BAN_LIST.length) {
+            for (const bdh of Image_BAN_LIST) {
+                if (!bdh) continue;
+                const dist = hamming64Hex(dh, bdh);
+                if (dist <= Image_THRESHOLD) {
+                    banModule_single("신문고 문의(ㅅ)", post_no, null, 744, 1, 1);
+                    row.classList.add("DCMOD_REDBG");
+                    return;
+                }
             }
         }
+
+
+        if (!hasAnyEmbedding(Image_BAN_EMB_B64)) return;
+        //const br = brownRatioFromBitmap(bmp);
+        //if (br < BROWN_EMBED_THRESHOLD) return false;
+
+        const hit = await checkEmbeddingAndMaybeBan(bmp);
+        if (hit) {
+            banModule_single("신문고 문의(ㅅ)", post_no, null, 6, 1, 0);
+            row.classList.add("DCMOD_REDBG");
+            return true;
+        }
+
+    } catch (e) {
+
+    } finally {
+        bmp?.close?.();
     }
+    return ;
 }
+
 
 function getImgUrl(el) {
     const u = el.getAttribute("data-src") || el.getAttribute("src") || "";
@@ -3998,14 +4074,11 @@ function dHashHexFromBitmap(bitmap) {
     ctx.drawImage(bitmap, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
 
-    // grayscale 값 배열 (w*h)
     const g = new Uint8Array(w * h);
     for (let i = 0, p = 0; i < g.length; i++, p += 4) {
-        // 단순 평균(빠름). 필요하면 가중치(0.299/0.587/0.114)로 변경 가능
         g[i] = (data[p] + data[p + 1] + data[p + 2]) / 3;
     }
 
-    // 64비트 해시를 BigInt로 구성
     let bits = 0n;
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < 8; x++) {
@@ -4015,7 +4088,6 @@ function dHashHexFromBitmap(bitmap) {
         }
     }
 
-    // 16진수(16자리)
     return bits.toString(16).padStart(16, "0");
 }
 
@@ -4031,12 +4103,119 @@ function hamming64Hex(aHex, bHex) {
 function isDcconUrl(url) {
     try {
         const u = new URL(url, location.href);
-        // dccon은 보통 dccon.php?no=... 형태
         return u.pathname.endsWith("/dccon.php") || u.pathname.includes("dccon.php");
     } catch {
         return false;
     }
 }
+
+function hasAnyEmbedding(arr) {
+    if (!Array.isArray(arr)) return false;
+    for (const v of arr) if (v) return true;
+    return false;
+}
+
+function brownRatioFromBitmap(bitmap) {
+    const size = 64;
+    const c = document.createElement("canvas");
+    c.width = size; c.height = size;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    const data = ctx.getImageData(0, 0, size, size).data;
+
+    let brown = 0, total = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const v = max; // 0~255
+        const s = max === 0 ? 0 : (max - min) / max; // 0~1
+
+        let h = 0; // 0~360
+        if (max !== min) {
+            if (max === r) h = 60 * ((g - b) / (max - min)) + (g < b ? 360 : 0);
+            else if (max === g) h = 60 * ((b - r) / (max - min)) + 120;
+            else h = 60 * ((r - g) / (max - min)) + 240;
+        }
+
+        total++;
+        if (h >= 15 && h <= 55 && s >= 0.25 && v >= 40 && v <= 220) brown++;
+    }
+
+    return brown / total;
+}
+
+function cosineSim(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+        const x = a[i], y = b[i];
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9);
+}
+
+function b64ToFloat32Cached(b64) {
+    if (!b64) return null;
+    const hit = EMB_CACHE.get(b64);
+    if (hit) return hit;
+
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+
+    if ((u8.byteLength % 4) !== 0) return null;
+
+    const f32 = new Float32Array(u8.buffer);
+    EMB_CACHE.set(b64, f32);
+    return f32;
+}
+
+async function embeddingFromBitmap(bitmap) {
+    const model = await ensureEmbedderReady();
+
+    const c = document.createElement("canvas");
+    c.width = 224; c.height = 224;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0, 224, 224);
+
+
+    const t = model.infer(c, true);
+    const emb = await t.data();
+    t.dispose();
+    return emb;
+}
+
+async function checkEmbeddingAndMaybeBan(bitmap) {
+    // 새 이미지 임베딩(한 번만)
+    const q = await embeddingFromBitmap(bitmap);
+
+    // DB 임베딩들 중 null 아닌 것만 비교
+    for (let i = 0; i < Image_BAN_EMB_B64.length; i++) {
+        const b64 = Image_BAN_EMB_B64[i];
+        if (!b64) continue;
+
+        const ref = b64ToFloat32Cached(b64);
+        if (!ref) continue;
+
+        const s = cosineSim(q, ref);
+
+        if (s >= EMB_COSINE_THRESHOLD) {
+            return { idx: i, score: s }; // hit
+        }
+    }
+    return null;
+}
+
+
+
+
+
+
 
 //협동작전차단
 async function processCoopText(postText, post_no) {
@@ -4405,6 +4584,7 @@ async function getMonitorData() {
             //제목검증시작
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
 
+
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"]) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
@@ -4416,8 +4596,6 @@ async function getMonitorData() {
 
                     if (id.length>2){
                         if (id === lastId || id === lastId2) {
-                            lastId2 = lastId;
-                            lastId = id;
                             const posts = Array.from(
                                 document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)')
                             ).map(tr => ({
@@ -4433,13 +4611,15 @@ async function getMonitorData() {
                                 banModule_single("신문고 문의(ㄱ)", pid, null, 744, 1, 1);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
-                                ban_after_cnt=10;
+                                ban_after_cnt=20;
                                 posts.slice(0, posts.length).forEach(p => {
                                     if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
                                         deleteModule_single(p.pid);
                                         p.el.classList.add('DCMOD_REDBG');
                                     }
                                 });
+                                lastId2 = lastId;
+                                lastId = id;
                                 continue;
                             }
 
@@ -4448,16 +4628,21 @@ async function getMonitorData() {
                                 banModule_single("신문고 문의(ㄴ)", pid, null, 744, 1, 1);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
-                                ban_after_cnt=10;
+                                ban_after_cnt=20;
                                 posts.slice(0, posts.length).forEach(p => {
                                     if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
                                         deleteModule_single(p.pid);
                                         p.el.classList.add('DCMOD_REDBG');
                                     }
                                 });
+                                lastId2 = lastId;
+                                lastId = id;
                                 continue;
                             }
                         }
+
+                        lastId2 = lastId;
+                        lastId = id;
                     }
                 }
 
