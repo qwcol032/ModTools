@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.4
+// @version      2.1.5
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -27,7 +27,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.4";
+let toolVersion = "2.1.5";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4212,18 +4212,14 @@ async function checkEmbeddingAndMaybeBan(bitmap) {
 }
 
 
-
-
-
-
-
 //협동작전차단
 async function processCoopText(postText, post_no) {
     if (!SETTING_VAR["useCoopBan"]) return;
-    if (postText.length < 5) return;
+    if (postText.length < 8) return;
 
     const matches = postText.match(coop_Reg);
-    if (!matches) return;
+    const matches2 = postText.includes("https://letsdoro.com/ticket/");
+    if (!matches && matches2==false) return;
 
     const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
     if (!row) return;
@@ -4582,6 +4578,7 @@ async function getMonitorData() {
             }
 
             //제목검증시작
+
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
 
 
