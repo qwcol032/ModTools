@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.5
+// @version      2.1.6
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -27,7 +27,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.5";
+let toolVersion = "2.1.6";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -41,10 +41,15 @@ let Image_BAN_EMB_B64 = [];
 let Image_THRESHOLD = 100;
 let EMB_COSINE_THRESHOLD;
 
+let wsDisabled = false;
+let retryTimer = null;
+let retryCount = 0;
 
 let ws;
 let keepAliveInterval = null;
 function connectWS(gallogId) {
+    console.log("wsDisabled",wsDisabled);
+    if (wsDisabled) return;
     ws = new WebSocket("wss://tamper-ws2.qwcol03220.workers.dev/ws");
 
     ws.onopen = () => {
@@ -71,20 +76,9 @@ function connectWS(gallogId) {
         keepAliveInterval = setInterval(() => {
             console.log("[WS] keepAlive");
             if (ws.readyState === WebSocket.OPEN) {
-                if(gallMonitorON){
-                    ws.send(JSON.stringify({
-                        type: "set_state",
-                        state: "on"
-                    }));
-                }
-                else{
-                    ws.send(JSON.stringify({
-                        type: "set_state",
-                        state: "off"
-                    }));
-                }
+                ws.send(JSON.stringify({ type: "ping" }));
             }
-        }, 1000 * 60 * 3);
+        }, 1000 * 60 * 1);
     };
 
 
@@ -94,10 +88,6 @@ function connectWS(gallogId) {
 
         if (data.type === "on_count") {
             document.querySelector('#DCMOD_MONITORING_LASTDATATIME').textContent = " 작동사드 "+data.count+"대 / 사드버전 "+toolVersion;
-        }
-
-        if (data.type === "image_result"){
-            imageScan(data.post_no,data.result);
         }
 
         if (data.type === "config") {
@@ -168,12 +158,43 @@ function connectWS(gallogId) {
 
     ws.onclose = () => {
         console.log("[WS] Closed — retrying in 3 seconds…");
-        setTimeout(connectWS(gallogId), 3000);
+        if (wsDisabled) return;
+        if (retryTimer) return;
+        retryTimer = setTimeout(() => {
+            retryTimer = null;
+            connectWS(gallogId);
+        }, 3000);
     };
     ws.onerror = (err) => {
         console.log("[WS] WS error:", err);
-        setTimeout(connectWS(gallogId), 3000);
+        stopWS("WS error");
+        setDefaultSettings();
     };
+}
+
+function setDefaultSettings(){
+    FUZZY_THRESHOLD = 1;
+    Writer_THRESHOLD = 1;
+    Image_THRESHOLD = 100;
+    EMB_COSINE_THRESHOLD = 1;
+}
+
+function stopWS() {
+  wsDisabled = true;
+
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+
+  if (ws) {
+    if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+      try { ws.close(1000, reason); } catch {}
+    }
+
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
+    ws = null;
+  }
 }
 
 function parseVar15(v15raw) {
@@ -281,9 +302,12 @@ function consonantSimilarity(a, b) {
 
 //제목유사도 검증
 function fastFuzzySpam(raw) {
+    if(FUZZY_BAN_LIST==undefined) return;
     const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
     const consT = extractConsonants(text);
+
+
 
     for(let i =0;i<FUZZY_BAN_LIST.length;i++){
         let p = FUZZY_BAN_LIST[i];
@@ -311,6 +335,7 @@ function fastFuzzySpam(raw) {
 
 //작성자유사도 검증
 function fastFuzzySpam2(text) {
+    if(Writer_BAN_LIST==undefined) return;
     const consT = extractConsonants(text);
 
     for(let i =0;i<Writer_BAN_LIST.length;i++){
@@ -847,7 +872,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["popupBanHour"] = 1;
     SETTING_VAR["appendAllGall"] = false;
     SETTING_VAR["addGIFControl"] = true;
-    SETTING_VAR["autoblockAIpost"] = false;
+    SETTING_VAR["autoblockAIpost"] = true;
     SETTING_VAR["useAutoPermaban"] = true;
     SETTING_VAR["disableWriterInfo"] = false;
     SETTING_VAR["popupIpBan"] = false;
@@ -882,7 +907,7 @@ await settingundefchecker("rBanHour", 1);
 await settingundefchecker("popupBanHour", 1);
 await settingundefchecker("appendAllGall", false);
 await settingundefchecker("addGIFControl", true);
-await settingundefchecker("autoblockAIpost", false);
+await settingundefchecker("autoblockAIpost", true);
 await settingundefchecker("useAutoPermaban", true);
 await settingundefchecker("disableWriterInfo", false);
 await settingundefchecker("popupIpBan", false);
@@ -3057,8 +3082,9 @@ function openSettingsPopup(elem) {
     if (closeSettingsPopup() == true) return;
     const popupDiv = document.createElement('div');
     popupDiv.className = 'DCMOD_SETTING_DIV';
+
     //function makeSettingLine(popupdiv, spantext, isButton, addBr, settingKey, placeholdertext) {//isbutton 0 = input
-    //let setting1 = makeSettingLine(popupDiv, '깡계기준글댓합', false, true, 'checkAcc_cnt', '숫자만');
+    let setting1 = makeSettingLine(popupDiv, '깡계기준글댓합', false, true, 'checkAcc_cnt', '숫자만');
     let setting2 = makeSettingLine(popupDiv, '깡계체크', true, true, 'checkAcc');
     let setting3 = makeSettingLine(popupDiv, '오류시다시요청', true, true, 'checkAcc_recheck');
     let setting4 = makeSettingLine(popupDiv, '천안문버튼표시', true, true, 'showglobalban');
@@ -3070,19 +3096,20 @@ function openSettingsPopup(elem) {
     let setting15 = makeSettingLine(popupDiv, '팝업차단-IP차단', true, true, 'popupIpBan');
     let setting9 = makeSettingLine(popupDiv, '비회원제한전체적용', true, true, 'appendAllGall');
     let setting11 = makeSettingLine(popupDiv, 'GIF컨트롤추가', true, true, 'addGIFControl');
-    //let setting12 = makeSettingLine(popupDiv, 'AI게시글자동차단', false, true, 'autoblockAIpostHour');
-    //let setting13 = makeSettingLine(popupDiv, '자동갱차사용', true, true, 'useAutoPermaban');
+    //t setting12 = makeSettingLine(popupDiv, 'AI게시글자동차단', false, true, 'autoblockAIpostHour');
+    let setting13 = makeSettingLine(popupDiv, '자동갱차사용', true, true, 'useAutoPermaban');
     let setting14 = makeSettingLine(popupDiv, '작성자정보표시안함', true, true, 'disableWriterInfo');
     let setting16 = makeSettingLine(popupDiv, '글로벌메모사용', true, true, 'useGlobalMemo');
     let setting17 = makeSettingLine(popupDiv, '이미지출처표시', true, true, 'useImgIDDecryptor');
     //let setting18 = makeSettingLine(popupDiv, 'UID기반차단', true, true, 'useUidAutoPermaban');
     //let setting19 = makeSettingLine(popupDiv, '협동작전차단시간', false, true, 'useCoopBanHour');
     //let setting20 = makeSettingLine(popupDiv, '협동작전-IP차단', true, true, 'useCoopIpBan');
+    let setting19 = makeSettingLine(popupDiv, '협동작전차단', true, true, 'useCoopBan');
     let setting21 = makeSettingLine(popupDiv, '댓글0 게시글강조', true, true, 'useCmtZeroImageban');
-    //let setting22 = makeSettingLine(popupDiv, '도배감지기', true, true, 'usePlasterban');
-    //let setting23 = makeSettingLine(popupDiv, '신문고댓글강조', false, true, 'useSinmungoCmtAlert');
+    let setting22 = makeSettingLine(popupDiv, '도배감지기', true, true, 'usePlasterban');
+    let setting23 = makeSettingLine(popupDiv, '신문고댓글강조', false, true, 'useSinmungoCmtAlert');
     let setting24 = makeSettingLine(popupDiv, '글댓비1:1감지', true, true, 'useAccPostCmt');
-    //let setting25 = makeSettingLine(popupDiv, '깡계움짤밴', true, true, 'useAccVideoban');
+    let setting25 = makeSettingLine(popupDiv, '깡계움짤밴', true, true, 'useAccVideoban');
 
     let setting26 = makeSettingLine(popupDiv, 'RegEx 사용', true, true, 'useRegEx');
     let setting27 = makeSettingLine(popupDiv, '념글등록페이지', false, true, 'recCount');
@@ -3091,7 +3118,7 @@ function openSettingsPopup(elem) {
     let setting30 = makeSettingLine(popupDiv, '념글개추기준', false, true, 'recNormalCount');
     let setting31 = makeSettingLine(popupDiv, '념글고닉추기준', false, true, 'recFixCount');
     let setting32 = makeSettingLine(popupDiv, '깡계사진체크밴', true, true, 'checkAccBan');
-    //let setting33 = makeSettingLine(popupDiv, '우회단어차단', false, true, 'useWordBypassBan');
+    //let setting33 = makeSettingLine(popupDiv, '우회단어차단', false, true, 'useWordBypassBan');*
 
     const yn_div = document.createElement('div');
     yn_div.setAttribute('class','DCMOD_YN_DIV');
@@ -3111,7 +3138,9 @@ function openSettingsPopup(elem) {
     popupDiv.style.left = `${rect.left + window.scrollX}px`;
 
     document.body.appendChild(popupDiv);
+
     s_btn.addEventListener('click', async function() {
+        let setting_checkacc_cnt = setting1[1].value;
         let setting_checkacc = setting2[1].innerHTML == 'YES' ? true : false;
         let setting_recheck = setting3[1].innerHTML == 'YES' ? true : false;
         let setting_showglobalban = setting4[1].innerHTML == 'YES' ? true : false;
@@ -3122,6 +3151,8 @@ function openSettingsPopup(elem) {
         let setting_appendAllGall = setting9[1].innerHTML == 'YES' ? true : false;
         let setting_popupBanHour = setting10[1].value;
         let setting_addGIFControl = setting11[1].innerHTML == 'YES' ? true : false;
+        //let setting_autoblockAIpostHour = setting12[1].value;
+        let setting_useAutoPermaban = setting13[1].innerHTML == 'YES' ? true : false;
         let setting_disableWriterInfo = setting14[1].innerHTML == 'YES' ? true : false;
         let setting_popupIpBan = setting15[1].innerHTML == 'YES' ? true : false;
         let setting_useGlobalMemo = setting16[1].innerHTML == 'YES' ? true : false;
@@ -3131,8 +3162,15 @@ function openSettingsPopup(elem) {
             return;
         }
         let setting_useImgIDDecryptor = setting17[1].innerHTML == 'YES' ? true : false;
+        //let setting_useUidAutoPermaban = setting18[1].innerHTML == 'YES' ? true : false;
+        //let setting_useCoopBanHour = setting19[1].value;
+        let setting_useCoopBan = setting19[1].innerHTML == 'YES' ? true : false;
         let setting_useCmtZeroImageban = setting21[1].innerHTML == 'YES' ? true : false;
+        let setting_usePlasterban = setting22[1].innerHTML == 'YES' ? true : false;
+        let setting_useSinmungoCmtAlert = setting23[1].value;
         let setting_useAccPostCmt = setting24[1].innerHTML == 'YES' ? true : false;
+        let setting_useAccVideoban = setting25[1].innerHTML == 'YES' ? true : false;
+
         let setting_useRegEx = setting26[1].innerHTML == 'YES' ? true : false;
         let setting_recCount = setting27[1].value;
         let setting_jojakCount = setting28[1].value;
@@ -3140,6 +3178,7 @@ function openSettingsPopup(elem) {
         let setting_recNormalCount = setting30[1].value;
         let setting_recFixCount = setting31[1].value;
         let setting_checkAccBan = setting32[1].innerHTML == 'YES' ? true : false;
+        //let setting_useWordBypassBan = setting33[1].value;
         if (BAN_VALID_TIMES.includes(Number(setting_rBanHour)) == false) {
             setting_rBanHour = NaN;
         }
@@ -3147,7 +3186,9 @@ function openSettingsPopup(elem) {
             setting_popupBanHour = NaN;
         }
         if (true) {
+
             SETTING_VAR["checkAcc"] = setting_checkacc;
+            SETTING_VAR["checkAcc_cnt"] = setting_checkacc_cnt;
             SETTING_VAR["checkAcc_recheck"] = setting_recheck;
             SETTING_VAR["showglobalban"] = setting_showglobalban;
             SETTING_VAR["checkAcc_newAccBold"] = setting_setNewAccBold;
@@ -3157,12 +3198,21 @@ function openSettingsPopup(elem) {
             SETTING_VAR["popupBanHour"] = setting_popupBanHour;
             SETTING_VAR["appendAllGall"] = setting_appendAllGall;
             SETTING_VAR["addGIFControl"] = setting_addGIFControl;
+            //SETTING_VAR["autoblockAIpostHour"] = setting_autoblockAIpostHour;
+            SETTING_VAR["useAutoPermaban"] = setting_useAutoPermaban;
             SETTING_VAR["disableWriterInfo"] = setting_disableWriterInfo;
             SETTING_VAR["popupIpBan"] = setting_popupIpBan;
             SETTING_VAR["useGlobalMemo"] = setting_useGlobalMemo;
             SETTING_VAR["useImgIDDecryptor"] = setting_useImgIDDecryptor;
+            //SETTING_VAR["useUidAutoPermaban"] = setting_useUidAutoPermaban;
+            //SETTING_VAR["useCoopBanHour"] = setting_useCoopBanHour;
+            SETTING_VAR["useCoopBan"] = setting_useCoopBan;
             SETTING_VAR["useCmtZeroImageban"] = setting_useCmtZeroImageban;
+            SETTING_VAR["usePlasterban"] = setting_usePlasterban;
+            SETTING_VAR["useSinmungoCmtAlert"] = setting_useSinmungoCmtAlert;
             SETTING_VAR["useAccPostCmt"] = setting_useAccPostCmt;
+            SETTING_VAR["useAccVideoban"] = setting_useAccVideoban;
+
             SETTING_VAR["useRegEx"] = setting_useRegEx;
             SETTING_VAR["recCount"] = setting_recCount;
             SETTING_VAR["jojakCount"] = setting_jojakCount;
@@ -3170,6 +3220,8 @@ function openSettingsPopup(elem) {
             SETTING_VAR["recNormalCount"] = setting_recNormalCount;
             SETTING_VAR["recFixCount"] = setting_recFixCount;
             SETTING_VAR["checkAccBan"] = setting_checkAccBan;
+            //SETTING_VAR["useWordBypassBan"] = setting_useWordBypassBan;
+
             await GM.setValue('SETTING', SETTING_VAR);
             closeSettingsPopup();
             process_ubwriter();
@@ -3177,7 +3229,7 @@ function openSettingsPopup(elem) {
             console.log(setting_checkacc_cnt);
             console.log(setting_rBanHour);
             console.log(setting_popupBanHour);
-            console.log(setting_autoblockAIpostHour);
+            //console.log(setting_autoblockAIpostHour);
             if (isNaN(setting_checkacc_cnt)) {
                 alert('깡계 기준은 숫자만 가능합니다.');
             } else {
@@ -3190,6 +3242,7 @@ function openSettingsPopup(elem) {
         closeSettingsPopup();
     });
 }
+
 function closeSettingsPopup() {
     const popup = document.querySelector('.DCMOD_SETTING_DIV');
     if (popup) {
@@ -3733,6 +3786,7 @@ async function toggleGallMonitoring() {
     if (gallMonitorON == false) {
         gallMonitorON = true;
 
+        wsDisabled = false;
         startWebsocket();
 
         clearPostList();
@@ -3904,7 +3958,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids2);
 
                     //깡계움짤밴
-                    processVideo(post_no);
+                    //processVideo(post_no);
                 }
             }
 
@@ -4567,7 +4621,7 @@ async function getMonitorData() {
             }
 
             //AI 자동차단
-            if (SETTING_VAR["autoblockAIpost"]) {
+            if (true) {
                 let datatype = post_addlist[i]?.getAttribute('data-type');
                 if (['icon_ai'].includes(datatype)) {
                     let pid = post_addlist[i].getAttribute('data-no')
@@ -4581,7 +4635,6 @@ async function getMonitorData() {
 
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
 
-
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"]) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
@@ -4592,6 +4645,7 @@ async function getMonitorData() {
                     }
 
                     if (id.length>2){
+
                         if (id === lastId || id === lastId2) {
                             const posts = Array.from(
                                 document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)')
@@ -4658,6 +4712,7 @@ async function getMonitorData() {
                 }
 
                 //제목 순회 검사
+                /*
                 if(SETTING_VAR["checkCircuitPost"]){
                     let cnt = await checkduppost2(post_str);
                     if(cnt>=3){
@@ -4665,7 +4720,7 @@ async function getMonitorData() {
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
-                }
+                }*/
             }
             //제목검증 끝
 
