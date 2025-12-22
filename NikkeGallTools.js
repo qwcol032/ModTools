@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.6
+// @version      2.1.7
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -27,7 +27,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.6";
+let toolVersion = "2.1.7";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -37,9 +37,7 @@ let Writer_BAN_LIST;
 let Writer_BAN_LIST2=[];
 let Writer_THRESHOLD;
 let Image_BAN_LIST = [];
-let Image_BAN_EMB_B64 = [];
-let Image_THRESHOLD = 100;
-let EMB_COSINE_THRESHOLD;
+let Image_THRESHOLD = 12;
 
 let wsDisabled = false;
 let retryTimer = null;
@@ -132,11 +130,11 @@ function connectWS(gallogId) {
 
             //이미지유사도리스트
             let v15raw = String(data.data.var15 ?? "");
-            const parsed = parseVar15(v15raw);
-            Image_BAN_LIST = parsed.hashes;
-            Image_BAN_EMB_B64 = parsed.embB64s;
+            v15raw = v15raw.replace(/[ \t]+/g, "");
+            let v15list = v15raw.split("\n");
+            v15list = v15list.filter(x => x.length > 0);
+            Image_BAN_LIST = v15list;
             Image_THRESHOLD = data.data.var17;
-            EMB_COSINE_THRESHOLD = data.data.var18;
 
 
 
@@ -173,10 +171,9 @@ function connectWS(gallogId) {
 }
 
 function setDefaultSettings(){
-    FUZZY_THRESHOLD = 1;
-    Writer_THRESHOLD = 1;
-    Image_THRESHOLD = 100;
-    EMB_COSINE_THRESHOLD = 1;
+    FUZZY_BAN_LIST.length = 0;
+    Writer_BAN_LIST.length = 0;
+    Image_BAN_LIST.length = 0;
 }
 
 function stopWS() {
@@ -195,31 +192,6 @@ function stopWS() {
     ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
     ws = null;
   }
-}
-
-function parseVar15(v15raw) {
-  v15raw = String(v15raw ?? "").replace(/\r/g, "");
-  v15raw = v15raw.replace(/[ \t]+/g, "");
-
-  const lines = v15raw.split("\n").map(s => s.trim()).filter(Boolean);
-
-  const hashes = [];
-  const embB64s = [];
-
-  for (const line of lines) {
-
-    const parts = line.split("|");
-    const hash = (parts[0] || "").toLowerCase();
-
-    if (!/^[0-9a-f]{16}$/.test(hash)) continue;
-
-    const b64 = parts[1] ? String(parts[1]).trim() : null;
-
-    hashes.push(hash);
-    embB64s.push(b64 && b64.length > 0 ? b64 : null);
-  }
-
-  return { hashes, embB64s };
 }
 
 function startWebsocket(){
@@ -242,9 +214,9 @@ function startWebsocket(){
     }
 }
 
-
+//갤제한
 if($.getURLParam('id')!=='gov'){
-    return;
+    //return;
 }
 
 //레벤슈타인 검증
@@ -303,11 +275,11 @@ function consonantSimilarity(a, b) {
 //제목유사도 검증
 function fastFuzzySpam(raw) {
     if(FUZZY_BAN_LIST==undefined) return;
+
     const text = raw.replace(/[^가-힣]/g, "");
     if (text.length < 3) return false;
+
     const consT = extractConsonants(text);
-
-
 
     for(let i =0;i<FUZZY_BAN_LIST.length;i++){
         let p = FUZZY_BAN_LIST[i];
@@ -3330,6 +3302,58 @@ async function checkTempAccount(uid) {
 }
 
 
+async function checkTempAccount2(uid) {
+    let ci = get_cookie('ci_c');
+    let response;
+    try {
+        response = await new Promise((resolve, reject) => {
+            try {
+                $.ajax({
+                    cache: false,
+                    type: 'POST',
+                    url: '/api/gallog_user_layer/gallog_content_reple/',
+                    data: { ci_t: ci, user_id: uid },
+                    success: resolve,
+                    error: reject,
+                    timeout: 1000
+                });
+            } catch(e) {
+                reject(null);
+            }
+        });
+    } catch(e) {
+        response = null;
+    }
+    try {
+        let pr = response.split(',');
+        let cnt = Number(pr[0]) + Number(pr[1]);
+        if (!isNaN(cnt)) {
+            //댓글이 0인경우 2번 인덱스를 0으로 설정
+            if(Number(pr[1])==0){
+                id_info[uid] = [cnt, new Date().getTime(),0];
+                await GM.setValue('idinfo', id_info);
+                return [uid, cnt, 0];
+            }
+            //댓글보다 글이 많은경우 2번 인덱스를 1으로 설정
+            else if(Number(pr[0])>Number(pr[1])){
+                id_info[uid] = [cnt, new Date().getTime(),1];
+                await GM.setValue('idinfo', id_info);
+                return [uid, cnt, 1];
+            }
+            else{
+                id_info[uid] = [cnt, new Date().getTime()];
+                await GM.setValue('idinfo', id_info);
+                return [uid, cnt];
+            }
+        } else {
+            return [uid, null];
+        }
+    } catch(e) {
+        return [uid, null];
+    }
+}
+
+
 function copyPullUpList() {
     var elem = document.querySelectorAll('#DCMOD_PULLUPLIST_DIV > table.Vgall_list tr.ub-content');
     var cpy = "";
@@ -3958,7 +3982,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids2);
 
                     //깡계움짤밴
-                    //processVideo(post_no);
+                    processVideo(post_no);
                 }
             }
 
@@ -3984,32 +4008,9 @@ async function getImageData(cspan) {//not image only
 }
 
 //이미지 유사도 차단
-const BROWN_EMBED_THRESHOLD = 0.1;
 const EMB_CACHE = new Map();
 let _mbModel = null;
 let _tfReady = false;
-
-async function ensureEmbedderReady() {
-    if (_mbModel) return _mbModel;
-
-    if (!_tfReady && window.tf?.ready) {
-        _tfReady = true;
-        try { await tf.setBackend("webgl"); } catch {}
-        await tf.ready();
-    }
-
-
-    const MODEL_URL =
-          "https://storage.googleapis.com/tfjs-models/savedmodel/mobilenet_v2_1.0_224/model.json";
-
-    _mbModel = await mobilenet.load({
-        version: 2,
-        alpha: 1.0,
-        modelUrl: MODEL_URL,
-    });
-
-    return _mbModel;
-}
 
 async function processImage(imgEl, post_no) {
     if (!imgEl || !imgEl.src) return;
@@ -4019,8 +4020,6 @@ async function processImage(imgEl, post_no) {
 
     const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
     if(row.classList.contains('DCMOD_REDBG')) return;
-
-
 
     if (id.length > 3) {
         if (!id_info[id]) await checkTempAccount(id);
@@ -4032,8 +4031,6 @@ async function processImage(imgEl, post_no) {
 
     const ab = await gmGetArrayBuffer(url);
 
-
-
     let bmp = null;
     let dh = "";
     try {
@@ -4042,6 +4039,7 @@ async function processImage(imgEl, post_no) {
         dh = dHashHexFromBitmap(bmp);
 
         if (dh && Image_BAN_LIST.length) {
+            console.log(post_no+"/"+dh);
             for (const bdh of Image_BAN_LIST) {
                 if (!bdh) continue;
                 const dist = hamming64Hex(dh, bdh);
@@ -4052,21 +4050,7 @@ async function processImage(imgEl, post_no) {
                 }
             }
         }
-
-
-        if (!hasAnyEmbedding(Image_BAN_EMB_B64)) return;
-        //const br = brownRatioFromBitmap(bmp);
-        //if (br < BROWN_EMBED_THRESHOLD) return false;
-
-        const hit = await checkEmbeddingAndMaybeBan(bmp);
-        if (hit) {
-            banModule_single("신문고 문의(ㅅ)", post_no, null, 6, 1, 0);
-            row.classList.add("DCMOD_REDBG");
-            return true;
-        }
-
     } catch (e) {
-
     } finally {
         bmp?.close?.();
     }
@@ -4163,109 +4147,6 @@ function isDcconUrl(url) {
     }
 }
 
-function hasAnyEmbedding(arr) {
-    if (!Array.isArray(arr)) return false;
-    for (const v of arr) if (v) return true;
-    return false;
-}
-
-function brownRatioFromBitmap(bitmap) {
-    const size = 64;
-    const c = document.createElement("canvas");
-    c.width = size; c.height = size;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0, size, size);
-    const data = ctx.getImageData(0, 0, size, size).data;
-
-    let brown = 0, total = 0;
-
-    for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        const v = max; // 0~255
-        const s = max === 0 ? 0 : (max - min) / max; // 0~1
-
-        let h = 0; // 0~360
-        if (max !== min) {
-            if (max === r) h = 60 * ((g - b) / (max - min)) + (g < b ? 360 : 0);
-            else if (max === g) h = 60 * ((b - r) / (max - min)) + 120;
-            else h = 60 * ((r - g) / (max - min)) + 240;
-        }
-
-        total++;
-        if (h >= 15 && h <= 55 && s >= 0.25 && v >= 40 && v <= 220) brown++;
-    }
-
-    return brown / total;
-}
-
-function cosineSim(a, b) {
-    let dot = 0, na = 0, nb = 0;
-    const n = Math.min(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const x = a[i], y = b[i];
-        dot += x * y;
-        na += x * x;
-        nb += y * y;
-    }
-    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-9);
-}
-
-function b64ToFloat32Cached(b64) {
-    if (!b64) return null;
-    const hit = EMB_CACHE.get(b64);
-    if (hit) return hit;
-
-    const bin = atob(b64);
-    const u8 = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-
-    if ((u8.byteLength % 4) !== 0) return null;
-
-    const f32 = new Float32Array(u8.buffer);
-    EMB_CACHE.set(b64, f32);
-    return f32;
-}
-
-async function embeddingFromBitmap(bitmap) {
-    const model = await ensureEmbedderReady();
-
-    const c = document.createElement("canvas");
-    c.width = 224; c.height = 224;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(bitmap, 0, 0, 224, 224);
-
-
-    const t = model.infer(c, true);
-    const emb = await t.data();
-    t.dispose();
-    return emb;
-}
-
-async function checkEmbeddingAndMaybeBan(bitmap) {
-    // 새 이미지 임베딩(한 번만)
-    const q = await embeddingFromBitmap(bitmap);
-
-    // DB 임베딩들 중 null 아닌 것만 비교
-    for (let i = 0; i < Image_BAN_EMB_B64.length; i++) {
-        const b64 = Image_BAN_EMB_B64[i];
-        if (!b64) continue;
-
-        const ref = b64ToFloat32Cached(b64);
-        if (!ref) continue;
-
-        const s = cosineSim(q, ref);
-
-        if (s >= EMB_COSINE_THRESHOLD) {
-            return { idx: i, score: s }; // hit
-        }
-    }
-    return null;
-}
-
-
 //협동작전차단
 async function processCoopText(postText, post_no) {
     if (!SETTING_VAR["useCoopBan"]) return;
@@ -4290,7 +4171,9 @@ async function processCoopText(postText, post_no) {
 
     // ID 기반 차단
     if (id.length > 3) {
-        if (!id_info[id]) await checkTempAccount(id);
+        if(!id_info[id] || id_info[id]?.[0] < SETTING_VAR["checkAcc_cnt"]){
+            await checkTempAccount2(id);
+        }
 
         if (id_info[id]?.[0] < SETTING_VAR["checkAcc_cnt"]) {
             banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
@@ -4596,16 +4479,18 @@ async function getMonitorData() {
             if(SETTING_VAR["useCoopBan"]){
                 const matches = post_str.match(coop_Reg);
                 if(matches != null){
-                    console.log(matches);
                     if(ip.length > 2){
                         banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
                     if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                        banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
-                        continue;
+                        await checkTempAccount2(id);
+                        if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                            banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            continue;
+                        }
                     }
                     else{
                         let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
@@ -4632,8 +4517,8 @@ async function getMonitorData() {
             }
 
             //제목검증시작
-
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
+                console.log(pid+"/"+post_str);
 
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"]) {
@@ -4712,7 +4597,6 @@ async function getMonitorData() {
                 }
 
                 //제목 순회 검사
-                /*
                 if(SETTING_VAR["checkCircuitPost"]){
                     let cnt = await checkduppost2(post_str);
                     if(cnt>=3){
@@ -4720,7 +4604,7 @@ async function getMonitorData() {
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
-                }*/
+                }
             }
             //제목검증 끝
 
