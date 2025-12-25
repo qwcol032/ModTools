@@ -12,8 +12,6 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
-// @require      https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js
-// @require      https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1
 // ==/UserScript==
 /*-----------------------------------------------------------------
 DBAD license / Copyright (C) 2025 ZENITH(int64)
