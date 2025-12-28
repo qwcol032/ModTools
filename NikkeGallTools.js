@@ -8279,6 +8279,7 @@ async function checkpermaban_monitoring() {//글목록이랑 댓글검색결과�
                 let writer_id = monitoring_data_reply[j].querySelector('td.gall_writer.ub-writer')?.getAttribute('data-uid');
                 if (writer_id != null && writer_id.length > 3 && PERMABAN_EXEC_OBJ.data.includes(writer_id) && !monitoring_data_reply[j].classList.contains('DCMOD_REDBG') && !monitoring_data_reply[j].classList.contains('DCMOD_YELLOWBG')) {
                     if (SETTING_VAR["useAutoPermaban"] == true) {
+                        ban_reply_arr.push([monitoring_data_reply[j], data_cmt[0], data_cmt[1], writer_id]);
                         monitoring_data_reply[j].classList.add('DCMOD_REDBG');
                     } else {
                         monitoring_data_reply[j].classList.add('DCMOD_YELLOWBG');
