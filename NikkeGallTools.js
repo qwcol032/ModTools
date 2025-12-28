@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.9
+// @version      2.2.0
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.9";
+let toolVersion = "2.2.0";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -37,6 +37,7 @@ let Writer_THRESHOLD;
 let Image_BAN_LIST = [];
 let Image_BAN_BITS = [];
 let Image_THRESHOLD = 12;
+let ban_word_list = [];
 
 let wsDisabled = false;
 let retryTimer = null;
@@ -148,8 +149,10 @@ function connectWS(gallogId) {
             SETTING_VAR["usePlasterban"] = cfg.var6;
             SETTING_VAR["checkCircuitPost"] = cfg.var11;
             SETTING_VAR["iplmageBan"] = cfg.var18;
+            SETTING_VAR["useWordBan"] = cfg.var20;
 
-            if (toolVersion != cfg.var12 && flagAlert) {
+
+            if (toolVersion != cfg.var12 && flagAlert && !gallMonitorON) {
                 alert(
                     "경고!\n사드툴이 최신버전이 아닙니다\n이대로 사드를 돌리면 치명적인 결과가 발생할수있습니다\n" +
                     "현재버전 " + toolVersion + " / 최신버전 " + cfg.var12
@@ -185,6 +188,11 @@ function connectWS(gallogId) {
             Image_BAN_LIST = v15list;
             rebuildImageBanCache();
             Image_THRESHOLD = cfg.var17;
+
+            //차단 단어 리스트
+            let v21raw = String(cfg.var21 ?? "").replace(/[ \t]+/g, "");
+            let v21list = v21raw.split("\n").filter(x => x.length > 0);
+            ban_word_list = v21list;
 
             // 갱차 리스트
             let v8raw = String(cfg.var8 ?? "").replace(/[ \t]+/g, "");
@@ -909,6 +917,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["checkAccBan"] = false;
     SETTING_VAR["checkCircuitPost"] = false;
     SETTING_VAR["iplmageBan"] = false;
+    SETTING_VAR["useWordBan"] = false;
 
     await GM.setValue('SETTING', SETTING_VAR);
 }
@@ -944,6 +953,7 @@ await settingundefchecker("jojakCut", 50);
 await settingundefchecker("checkAccBan", false);
 await settingundefchecker("checkCircuitPost", false);
 await settingundefchecker("iplmageBan", false);
+await settingundefchecker("useWordBan", false);
 
 
 //dcinside 04xx 30->31d fix
@@ -4016,10 +4026,15 @@ async function getImageData(cspan) {//not image only
                     continue;
                 }
 
+                if(hasReferrerPolicyAttr(curimg)){
+                    continue;
+                }
+
                 // 이미지 유사도 검증
                 processImage(img, post_no);
+
                 ipImageBan(post_no);
-                const url = img.getAttribute
+
             }
             for (let curvids1 of vids) {
                 if (curvids1.src.startsWith('https://gall.dcinside.com/board/movie/movie_view')) {
@@ -4052,6 +4067,9 @@ async function getImageData(cspan) {//not image only
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
 
+            //차단단어검증
+            checkBanWord(post_str, post_no,true);
+
         } catch(e) {
             if (e.message == 'Failed to fetch') {
                 cur.classList.add('must_parse');
@@ -4059,6 +4077,32 @@ async function getImageData(cspan) {//not image only
             } else {
                 console.log(e);
             }
+        }
+    }
+}
+
+//차단단어검증
+async function checkBanWord(postText, post_no, sub) {
+    if(!SETTING_VAR["useWordBan"]) return;
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+    if (id.length > 3) {
+        if (!id_info[id]) await checkTempAccount(id);
+        if (id_info[id]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
+    }
+
+    const replace_str = String(postText).replace(/\s+/g, "");
+
+    if(sub) console.log(post_no+"/"+postText);
+    for (const w of ban_word_list) {
+        if (!w) continue;
+
+        if (replace_str.includes(w)) {
+            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            row.classList.add("DCMOD_REDBG");
+            return true;
         }
     }
 }
@@ -4566,7 +4610,15 @@ function isDcconUrl(url) {
         s = String(url);
     }
 
-    return s.toLowerCase().includes("dccon");
+    if(s.toLowerCase().includes("dccon")){
+        return true;
+    }
+    return false;
+}
+
+function hasReferrerPolicyAttr(imgEl) {
+  if (!(imgEl instanceof HTMLImageElement)) return false;
+  return imgEl.hasAttribute("referrerpolicy");
 }
 
 //협동작전차단
@@ -5006,10 +5058,14 @@ async function getMonitorData() {
                     }
                 }
 
+                //차단단어검증
+                if(checkBanWord(post_str,pid,false)){
+                    continue;
+                }
+
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
-                    console.log(pid+"/"+post_str);
-                    banModule_single("신문고 문의(ㄹ)", pid, null, 6, 1, 0);
+                    banModule_single("신문고 문의(ㄹ)", pid, null, 744, 1, 1);
                     post_addlist[i].classList.add('DCMOD_REDBG');
                     continue;
                 }
