@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.0
+// @version      2.2.1
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.0";
+let toolVersion = "2.2.1";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4102,7 +4102,7 @@ async function checkBanWord(postText, post_no, sub) {
             banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
             row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             row.classList.add("DCMOD_REDBG");
-            return true;
+            return;
         }
     }
 }
@@ -5058,11 +5058,6 @@ async function getMonitorData() {
                     }
                 }
 
-                //차단단어검증
-                if(checkBanWord(post_str,pid,false)){
-                    continue;
-                }
-
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
                     banModule_single("신문고 문의(ㄹ)", pid, null, 744, 1, 1);
@@ -5086,6 +5081,9 @@ async function getMonitorData() {
                         continue;
                     }
                 }
+
+                //차단단어검증
+                checkBanWord(post_str,pid,false);
             }
             //제목검증 끝
 
