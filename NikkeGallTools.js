@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.1
+// @version      2.2.2
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.1";
+let toolVersion = "2.2.2";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -199,6 +199,7 @@ function connectWS(gallogId) {
             let v8list = v8raw.split("\n").filter(x => x.length > 0);
             PERMABAN_EXEC_OBJ.data = v8list;
             SETTING_VAR["useAutoPermaban"] = true;
+            console.log(PERMABAN_EXEC_OBJ.data);
 
             // 갤러리 설정
             appendBlockSetting2(cfg.var10);
@@ -8166,7 +8167,8 @@ async function check_permaban_reply() {
             let writer_id = liNodes[i]?.querySelector("span.gall_writer.ub-writer")?.getAttribute('data-uid');
             let reply_id = liNodes[i]?.querySelector("div.cmt_info")?.getAttribute('data-no');
             if (writer_id == null || writer_id.length == 0 || reply_id == null || reply_id.length == 0 || reply_id == '0') continue;
-            if (PERMABAN_EXEC_OBJ.target_gall == gallName && PERMABAN_EXEC_OBJ.data.includes(writer_id)) {
+
+            if (PERMABAN_EXEC_OBJ.data.includes(writer_id)) {
                 let time = timestrtoDateV3(liNodes[i].querySelector('span.date_time').textContent.trim());
                 console.log(liNodes[i]);
                 console.log(time);
