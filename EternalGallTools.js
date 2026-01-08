@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EternalGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.1.9
+// @version      2.2.3
 // @description  갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.1.9";
+let toolVersion = "2.2.3";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -37,6 +37,7 @@ let Writer_THRESHOLD;
 let Image_BAN_LIST = [];
 let Image_BAN_BITS = [];
 let Image_THRESHOLD = 12;
+let ban_word_list = [];
 
 let wsDisabled = false;
 let retryTimer = null;
@@ -148,8 +149,10 @@ function connectWS(gallogId) {
             SETTING_VAR["usePlasterban"] = cfg.var6;
             SETTING_VAR["checkCircuitPost"] = cfg.var11;
             SETTING_VAR["iplmageBan"] = cfg.var18;
+            SETTING_VAR["useWordBan"] = cfg.var20;
 
-            if (toolVersion != cfg.var12 && flagAlert) {
+
+            if (toolVersion != cfg.var12 && flagAlert && !gallMonitorON) {
                 alert(
                     "경고!\n사드툴이 최신버전이 아닙니다\n이대로 사드를 돌리면 치명적인 결과가 발생할수있습니다\n" +
                     "현재버전 " + toolVersion + " / 최신버전 " + cfg.var12
@@ -185,6 +188,11 @@ function connectWS(gallogId) {
             Image_BAN_LIST = v15list;
             rebuildImageBanCache();
             Image_THRESHOLD = cfg.var17;
+
+            //차단 단어 리스트
+            let v21raw = String(cfg.var21 ?? "").replace(/[ \t]+/g, "");
+            let v21list = v21raw.split("\n").filter(x => x.length > 0);
+            ban_word_list = v21list;
 
             // 갱차 리스트
             let v8raw = String(cfg.var8 ?? "").replace(/[ \t]+/g, "");
@@ -909,6 +917,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["checkAccBan"] = false;
     SETTING_VAR["checkCircuitPost"] = false;
     SETTING_VAR["iplmageBan"] = false;
+    SETTING_VAR["useWordBan"] = false;
 
     await GM.setValue('SETTING', SETTING_VAR);
 }
@@ -944,6 +953,7 @@ await settingundefchecker("jojakCut", 50);
 await settingundefchecker("checkAccBan", false);
 await settingundefchecker("checkCircuitPost", false);
 await settingundefchecker("iplmageBan", false);
+await settingundefchecker("useWordBan", false);
 
 
 //dcinside 04xx 30->31d fix
@@ -4016,10 +4026,15 @@ async function getImageData(cspan) {//not image only
                     continue;
                 }
 
+                if(hasReferrerPolicyAttr(curimg)){
+                    continue;
+                }
+
                 // 이미지 유사도 검증
                 processImage(img, post_no);
+
                 ipImageBan(post_no);
-                const url = img.getAttribute
+
             }
             for (let curvids1 of vids) {
                 if (curvids1.src.startsWith('https://gall.dcinside.com/board/movie/movie_view')) {
@@ -4052,6 +4067,9 @@ async function getImageData(cspan) {//not image only
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
 
+            //차단단어검증
+            checkBanWord(post_str, post_no,true);
+
         } catch(e) {
             if (e.message == 'Failed to fetch') {
                 cur.classList.add('must_parse');
@@ -4059,6 +4077,39 @@ async function getImageData(cspan) {//not image only
             } else {
                 console.log(e);
             }
+        }
+    }
+}
+
+//차단단어검증
+async function checkBanWord(postText, post_no, sub) {
+    if(!SETTING_VAR["useWordBan"]) return;
+
+    const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+    if (id.length > 3) {
+        if (!id_info[id]) await checkTempAccount(id);
+        if (id_info[id]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
+    }
+
+    const replace_str = String(postText).replace(/\s+/g, "");
+    const replace_str2 = String(postText).replace(/[^가-힣]/g, "");
+
+    if(sub) console.log(post_no+"/"+postText);
+    for (const w of ban_word_list) {
+        if (!w) continue;
+
+        if (replace_str.includes(w)) {
+            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            row.classList.add("DCMOD_REDBG");
+            return;
+        }
+        if (replace_str2.includes(w)) {
+            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            row.classList.add("DCMOD_REDBG");
+            return;
         }
     }
 }
@@ -4566,7 +4617,15 @@ function isDcconUrl(url) {
         s = String(url);
     }
 
-    return s.toLowerCase().includes("dccon");
+    if(s.toLowerCase().includes("dccon")){
+        return true;
+    }
+    return false;
+}
+
+function hasReferrerPolicyAttr(imgEl) {
+  if (!(imgEl instanceof HTMLImageElement)) return false;
+  return imgEl.hasAttribute("referrerpolicy");
 }
 
 //협동작전차단
@@ -4892,40 +4951,9 @@ async function getMonitorData() {
             date = date.slice(-5,-3);
             if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
 
-
             if(id.length > 2){
                 if (id_info[id] == undefined) {
                     await checkTempAccount(id);
-                }
-            }
-
-            //협동작전 제목 검증
-            if(SETTING_VAR["useCoopBan"]){
-                const matches = post_str.match(coop_Reg);
-                if(matches != null){
-                    if(ip.length > 2){
-                        banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
-                        continue;
-                    }
-                    if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                        await checkTempAccount2(id);
-                        if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                            banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
-                            continue;
-                        }
-                    }
-                    else{
-                        let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
-                        if(tag.includes('일반')){
-                            let changeTag = [];
-                            changeTag.push([pid,"Test",id]);
-                            bulkMovePosts(changeTag,230);
-                            post_addlist[i].classList.add('DCMOD_YELLOWBG');
-                            continue;
-                        }
-                    }
                 }
             }
 
@@ -4946,14 +4974,54 @@ async function getMonitorData() {
 
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"]) {
-                    if(ban_after_cnt == 0) preBanarr.length = 0;
-                    if (preBanarr.includes(id)){
+                    if (i === 0) {
+                        window.DCMOD_TITLE_MAP = {};
+
+                        const allTrs = document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)');
+                        allTrs.forEach(tr => {
+                            const tText = tr.querySelector('td.gall_tit.ub-word')?.textContent.trim();
+                            const tId = tr.querySelector('td.ub-writer')?.getAttribute('data-uid');
+                            const tPid = tr.getAttribute('data-no');
+
+                            if (tText) {
+                                if (!window.DCMOD_TITLE_MAP[tText]) window.DCMOD_TITLE_MAP[tText] = [];
+                                window.DCMOD_TITLE_MAP[tText].push({ el: tr, id: tId, pid: tPid, text: tText });
+                            }
+                        });
+                    }
+
+                    if (ban_after_cnt == 0) preBanarr.length = 0;
+                    if (preBanarr.includes(id)) {
                         deleteModule_single(pid);
                         post_addlist[i].classList.add('DCMOD_REDBG');
                         continue;
                     }
 
                     if (id.length>2){
+
+                        const sameTitleGroup = window.DCMOD_TITLE_MAP[post_str];
+
+                        if (sameTitleGroup && sameTitleGroup.length >= 3) {
+
+                            if (!preBanarr.includes(id)) {
+                                banModule_single("나쟈갤 문의(M)", pid, null, 744, 1, 1);
+                                preBanarr.push(id);
+                                ban_after_cnt = 20;
+                            }
+
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+
+                            sameTitleGroup.forEach(p => {
+                                if (!p.el.classList.contains('DCMOD_REDBG')) {
+                                    deleteModule_single(p.pid);
+                                    p.el.classList.add('DCMOD_REDBG');
+                                }
+                            });
+
+                            lastId2 = lastId;
+                            lastId = id;
+                            continue;
+                        }
 
                         if (id === lastId || id === lastId2) {
                             const posts = Array.from(
@@ -4968,7 +5036,7 @@ async function getMonitorData() {
 
                             const duplicates = posts.filter(p => p.id === id && p.text === post_str);
                             if (duplicates.length >= 3) {
-                                banModule_single("신문고 문의(ㄱ)", pid, null, 744, 1, 1);
+                                banModule_single("나쟈갤 문의(S)", pid, null, 744, 1, 1);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
                                 ban_after_cnt=20;
@@ -4985,7 +5053,7 @@ async function getMonitorData() {
 
                             const duplicates2 = posts.filter(p => p.id === id && p.date === date);
                             if (duplicates2.length >= 3) {
-                                banModule_single("신문고 문의(ㄴ)", pid, null, 744, 1, 1);
+                                banModule_single("나쟈갤 문의(SS)", pid, null, 744, 1, 1);
                                 post_addlist[i].classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
                                 ban_after_cnt=20;
@@ -5008,8 +5076,7 @@ async function getMonitorData() {
 
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
-                    console.log(pid+"/"+post_str);
-                    banModule_single("신문고 문의(ㄹ)", pid, null, 6, 1, 0);
+                    banModule_single("신문고 문의(ㄹ)", pid, null, 744, 1, 1);
                     post_addlist[i].classList.add('DCMOD_REDBG');
                     continue;
                 }
@@ -5030,6 +5097,9 @@ async function getMonitorData() {
                         continue;
                     }
                 }
+
+                //차단단어검증
+                checkBanWord(post_str,pid,false);
             }
             //제목검증 끝
 
@@ -8112,7 +8182,8 @@ async function check_permaban_reply() {
             let writer_id = liNodes[i]?.querySelector("span.gall_writer.ub-writer")?.getAttribute('data-uid');
             let reply_id = liNodes[i]?.querySelector("div.cmt_info")?.getAttribute('data-no');
             if (writer_id == null || writer_id.length == 0 || reply_id == null || reply_id.length == 0 || reply_id == '0') continue;
-            if (PERMABAN_EXEC_OBJ.target_gall == gallName && PERMABAN_EXEC_OBJ.data.includes(writer_id)) {
+
+            if (PERMABAN_EXEC_OBJ.data.includes(writer_id)) {
                 let time = timestrtoDateV3(liNodes[i].querySelector('span.date_time').textContent.trim());
                 console.log(liNodes[i]);
                 console.log(time);
@@ -8223,6 +8294,7 @@ async function checkpermaban_monitoring() {//글목록이랑 댓글검색결과�
                 let writer_id = monitoring_data_reply[j].querySelector('td.gall_writer.ub-writer')?.getAttribute('data-uid');
                 if (writer_id != null && writer_id.length > 3 && PERMABAN_EXEC_OBJ.data.includes(writer_id) && !monitoring_data_reply[j].classList.contains('DCMOD_REDBG') && !monitoring_data_reply[j].classList.contains('DCMOD_YELLOWBG')) {
                     if (SETTING_VAR["useAutoPermaban"] == true) {
+                        ban_reply_arr.push([monitoring_data_reply[j], data_cmt[0], data_cmt[1], writer_id]);
                         monitoring_data_reply[j].classList.add('DCMOD_REDBG');
                     } else {
                         monitoring_data_reply[j].classList.add('DCMOD_YELLOWBG');
