@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.3
+// @version      2.2.4
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.3";
+let toolVersion = "2.2.4";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -150,7 +150,7 @@ function connectWS(gallogId) {
             SETTING_VAR["checkCircuitPost"] = cfg.var11;
             SETTING_VAR["iplmageBan"] = cfg.var18;
             SETTING_VAR["useWordBan"] = cfg.var20;
-
+            SETTING_VAR["reverseMode"] = cfg.var22;
 
             if (toolVersion != cfg.var12 && flagAlert && !gallMonitorON) {
                 alert(
@@ -918,6 +918,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["checkCircuitPost"] = false;
     SETTING_VAR["iplmageBan"] = false;
     SETTING_VAR["useWordBan"] = false;
+    SETTING_VAR["reverseMode"] = false;
 
     await GM.setValue('SETTING', SETTING_VAR);
 }
@@ -954,6 +955,7 @@ await settingundefchecker("checkAccBan", false);
 await settingundefchecker("checkCircuitPost", false);
 await settingundefchecker("iplmageBan", false);
 await settingundefchecker("useWordBan", false);
+await settingundefchecker("reverseMode", false);
 
 
 //dcinside 04xx 30->31d fix
@@ -2605,6 +2607,11 @@ async function deleteModule_single(postNo, replyNo) {
 }
 async function banModule_single(reason, postNo, replyNo, bantime, delete_it, ban_ip) {
     if (postNo == null || delete_it == null || ban_ip == null || bantime == null || !BAN_VALID_TIMES.includes(Number(bantime))) return false;
+
+    if(SETTING_VAR["reverseMode"]){
+        bantime = 6;
+    }
+
     let banA = null;
     let banB = null;//parent
     if (replyNo != null) {
@@ -4820,6 +4827,8 @@ const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![
 
 let lastId;
 let lastId2;
+let lastIp;
+let lastIp2;
 let preBanarr = [];
 let ban_after_cnt;
 async function getMonitorData() {
@@ -5006,13 +5015,15 @@ async function getMonitorData() {
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"]) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
-                    if (preBanarr.includes(id)){
-                        deleteModule_single(pid);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
-                        continue;
-                    }
+
 
                     if (id.length>2){
+
+                        if (preBanarr.includes(id)){
+                            deleteModule_single(pid);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            continue;
+                        }
 
                         if (id === lastId || id === lastId2) {
                             const posts = Array.from(
@@ -5034,6 +5045,7 @@ async function getMonitorData() {
                                 posts.slice(0, posts.length).forEach(p => {
                                     if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
                                         deleteModule_single(p.pid);
+                                        p.el.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
                                         p.el.classList.add('DCMOD_REDBG');
                                     }
                                 });
@@ -5051,6 +5063,7 @@ async function getMonitorData() {
                                 posts.slice(0, posts.length).forEach(p => {
                                     if (p.id === id && !p.el.classList.contains('DCMOD_REDBG')) {
                                         deleteModule_single(p.pid);
+                                        p.el.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
                                         p.el.classList.add('DCMOD_REDBG');
                                     }
                                 });
@@ -5064,6 +5077,51 @@ async function getMonitorData() {
                         lastId = id;
                     }
                 }
+
+                if (ip.length>2){
+
+                    if (ip === lastIp || ip === lastIp2) {
+                        const posts = Array.from(
+                            document.querySelectorAll('table.gall_list tbody.listwrap2 tr.ub-content.us-post:not(.image_box)')
+                        ).map(tr => ({
+                            el: tr,
+                            ip : tr.querySelector('td.ub-writer')?.getAttribute('data-ip'),
+                            text: tr.querySelector('td.gall_tit.ub-word')?.textContent.trim(),
+                            pid: tr.getAttribute('data-no'),
+                            date: tr.querySelector('td.gall_date')?.getAttribute('title').slice(-5,-3)
+                        }));
+
+                        if (preBanarr.includes(ip)){
+                            deleteModule_single(pid);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            continue;
+                        }
+
+                        const duplicates = posts.filter(p => p.text === post_str);
+                        if (duplicates.length >= 3) {
+                            banModule_single("신문고 문의(가)", pid, null, 744, 1, 1);
+                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            preBanarr.push(ip);
+                            ban_after_cnt=20;
+                            posts.slice(0, posts.length).forEach(p => {
+                                if (p.text === post_str && p.ip.length>2) {
+                                    deleteModule_single(p.pid);
+                                    p.el.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+                                    p.el.classList.add('DCMOD_REDBG');
+                                }
+                            });
+                            lastIp2 = lastIp;
+                            lastIp = ip;
+                            continue;
+                        }
+
+
+                    }
+
+                    lastIp2 = lastIp;
+                    lastIp = ip;
+                }
+
 
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
