@@ -4010,6 +4010,7 @@ async function getImageData(cspan) {//not image only
             }
 
             let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${$.getURLParam('id')}&no=${post_no}`, { credentials: 'include' });
+            if (!resp) continue;
             var data = new DOMParser().parseFromString(await resp.text(), "text/html");
             if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) doIDBexec(data, post_no);
             let imgs = data.querySelectorAll('div.write_div img');
