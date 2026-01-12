@@ -4023,6 +4023,7 @@ async function getImageData(cspan) {//not image only
                 td.setAttribute('colspan', '8');
             }
             let post_str = truncateString(data.querySelector('div.write_div').textContent.trim(), 128);
+            if(!post_str) continue;
             if (post_str.trim().length > 1) {
                 let pp = document.createElement('p');
                 pp.textContent = post_str;
