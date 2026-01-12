@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.5
+// @version      2.2.6
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -26,7 +26,7 @@ https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
 
-let toolVersion = "2.2.5";
+let toolVersion = "2.2.6";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -3981,15 +3981,34 @@ function iframeResizer(frameElem) {
 
 const postdata_observer = new IntersectionObserver(postdata_observer_callback);
 async function getImageData(cspan) {//not image only
-    let mparse = document.querySelectorAll('tr.must_parse');
+    let mparse = document.querySelectorAll('tr.must_parse, tr.rechk');
     for (let cur of mparse) {
         cur.classList.remove('must_parse');
+        cur.classList.remove('rechk');
     }
     for (let cur of mparse) {
         try {
             if (Number(cur.getAttribute('retry-count')) >= 3) continue;
             if (gallMonitorON == false) break;
             let post_no = cur.getAttribute('data-must-parse');
+
+            const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+            if (!row) continue;
+            const tip = row.querySelector("td.ub-writer")?.getAttribute("data-ip") ?? "";
+            const tid = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
+            if (tid.length > 3) {
+                if (!id_info[tid]) await checkTempAccount(tid);
+            }
+            const isIpPost = (tip.length > 2);
+            const isTempAcc =
+                  (tid.length > 2) &&
+                  (id_info[tid] !== undefined) &&
+                  (id_info[tid][0] < SETTING_VAR["checkAcc_cnt"]);
+
+            if (isIpPost || isTempAcc) {
+                cur.classList.add("rechk");
+            }
+
             let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${$.getURLParam('id')}&no=${post_no}`, { credentials: 'include' });
             var data = new DOMParser().parseFromString(await resp.text(), "text/html");
             if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) doIDBexec(data, post_no);
@@ -4066,7 +4085,8 @@ async function getImageData(cspan) {//not image only
             }
 
 
-            if (td.innerHTML.trim().length > 0) {
+            if (td.innerHTML.trim().length > 0 && !cur.classList.contains("already")) {
+                cur.classList.add("already");
                 cur.appendChild(td);
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
@@ -4094,6 +4114,7 @@ async function checkBanWord(postText, post_no, sub) {
     if(!SETTING_VAR["useWordBan"]) return;
 
     const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
+    if (!row) return;
     const id = row.querySelector("td.ub-writer")?.getAttribute("data-uid") ?? "";
     if (id.length > 3) {
         if (!id_info[id]) await checkTempAccount(id);
@@ -4822,9 +4843,15 @@ function articleAndReplyBulkDeletor() {
 }
 
 
+const baseUrl = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=`;
+
+async function fetchReplyRows(keyword) {
+  const resp = await fetch(baseUrl + encodeURIComponent(keyword), { credentials: "include" });
+  const doc = new DOMParser().parseFromString(await resp.text(), "text/html");
+  return Array.from(doc?.querySelectorAll("table.gall_list > tbody > tr") ?? []);
+}
+
 const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![A-Za-z0-9])/g; //협동작전 정규식
-
-
 
 let lastId;
 let lastId2;
@@ -4838,10 +4865,23 @@ async function getMonitorData() {
         nodup = true;
         let target = document.querySelector('table.gall_list').querySelector('tbody');
 
-
+        /*
         let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=%2520`, { credentials: 'include' });
         var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
-        let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');
+        let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');*/
+
+
+        const rowsSpace = await fetchReplyRows("%2520");
+        const rowsP = await fetchReplyRows("p");
+        const merged = [...rowsSpace, ...rowsP];
+
+        const seen = new Set();
+        const reply_tbldata = merged.filter(tr => {
+            const key = tr.getAttribute("data-cmt") || tr.outerHTML;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
 
         let reply_addlist = [];
         let r_id_max = GMD_LATEST_REPLY;
@@ -4902,14 +4942,30 @@ async function getMonitorData() {
                     if(SETTING_VAR["useSinmungoCmtAlert"] > 0){
                         if(oldUrl.searchParams.get('no') == SETTING_VAR["useSinmungoCmtAlert"]){
                             cur.classList.add('DCMOD_YELLOWBG');
-                            const n = new Notification(cur.querySelector('td.gall_writer.ub-writer').getAttribute('data-nick')+"("+cur.querySelector('td.gall_writer.ub-writer').getAttribute('data-uid')+")", {
-                                body: cur.querySelector('div.sch_cmt a').textContent.trim(),
-                            });
 
+                            const titleEl = cur.querySelector('td.gall_writer.ub-writer');
+                            const bodyText = cur.querySelector('div.sch_cmt a')?.textContent?.trim() ?? "";
+                            const n = new Notification(
+                                `${titleEl.getAttribute('data-nick')}(${titleEl.getAttribute('data-uid')})`,
+                                { body: bodyText, silent: false }
+                            );
+
+                            const reGall = /https:\/\/gall\.dcinside\.com\/(?:(?:mgallery\/)?board\/view\/\?id=[^&\s#]+&no=|[A-Za-z0-9_-]+\/)\d{7}/g;
                             n.onclick = (e) => {
                                 e.preventDefault();
                                 n.close();
-                                window.open(`https://gall.dcinside.com/gov/${SETTING_VAR["useSinmungoCmtAlert"]}`, "_blank", "noopener");
+
+                                const matches = bodyText.match(reGall) || [];
+                                if (matches.length === 1) {
+                                    const url = matches[0].startsWith("http") ? matches[0] : `https://${matches[0]}`;
+                                    window.open(url, "_blank", "noopener");
+                                } else {
+                                    window.open(
+                                        `https://gall.dcinside.com/gov/${SETTING_VAR["useSinmungoCmtAlert"]}`,
+                                        "_blank",
+                                        "noopener"
+                                    );
+                                }
                             };
                         }
                     }
@@ -4930,6 +4986,13 @@ async function getMonitorData() {
             let sub = cur.querySelector('td.gall_subject')?.textContent?.trim();//말머리를 쓰지않는경우 error fix
             if (sub == '공지' || sub == '설문' || sub == '뉴스') continue;
             let post_id = Number(cur.getAttribute('data-no'));
+            const wid = cur.querySelector('td.ub-writer')?.getAttribute('data-uid') ?? "";
+            const ip = cur.querySelector('td.ub-writer')?.getAttribute('data-ip') ?? "";
+            if(wid.length>2){
+                if (id_info[wid] == undefined) {
+                    await checkTempAccount(wid);
+                }
+            }
             if (post_id == 0) continue;
             if (GMD_LATEST_POST < post_id) {
                 if (p_id_max < post_id) p_id_max = post_id;
@@ -4938,37 +5001,57 @@ async function getMonitorData() {
                 //add nickname click event
                 let nickclicks = cur.querySelector('span.nickname');
                 nickclicks.addEventListener('click', function(e) { get_user_data(e.target); });
-                post_addlist.push(cur);
+                post_addlist.push({ el: cur, skipPrepend: false });
+            }
+            else {
+                const isIpPost = (ip.length > 2);
+                const isTempAcc =
+                      (wid.length > 2) &&
+                      (id_info[wid] !== undefined) &&
+                      (id_info[wid][0] < SETTING_VAR["checkAcc_cnt"]);
+
+                if (isIpPost || isTempAcc) {
+                    post_addlist.push({ el: cur, skipPrepend: true });
+                }
             }
         }
         if (GMD_LATEST_POST < p_id_max) GMD_LATEST_POST = p_id_max;
-        for (let i=post_addlist.length-1; i>=0; i--) {
-            let tr = document.createElement('tr');
-            tr.setAttribute('class', 'ub-content us-post image_box must_parse visCheck_hidden');
-            if (ISDARKMODE) tr.classList.add('DCMOD_DARKBG');
-            tr.setAttribute('retry-count', '0');
-            tr.setAttribute('data-must-parse', post_addlist[i].getAttribute('data-no'));
-            target.prepend(tr);
-            let chkbox = document.createElement('td');
-            chkbox.setAttribute('class', 'gall_chk');
-            chkbox.innerHTML = `
-            <span class="checkbox">
-            <input type="checkbox" name="chk_article[]" class="list_chkbox article_chkbox">
-            <em class="checkmark"></em>
-            <label class="blind">글 선택</label>
-            </span>
-            `;
-            post_addlist[i].prepend(chkbox);
-            target.prepend(post_addlist[i]);
+        for (let i = post_addlist.length - 1; i >= 0; i--) {
+            const item = post_addlist[i];
+            const row = item.el;
 
-            let post_str = post_addlist[i].querySelector('td.gall_tit.ub-word').textContent.trim();
-            let pid = post_addlist[i].getAttribute('data-no')
-            let ip = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-ip');
-            let id = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-uid');
-            let nick = post_addlist[i]?.querySelector('td.ub-writer')?.getAttribute('data-nick');
-            let date = post_addlist[i]?.querySelector('td.gall_date')?.getAttribute('title');
+            //새로운 글만 tr을 생성
+            if (!item.skipPrepend) {
+                let tr = document.createElement('tr');
+                tr.setAttribute('class', 'ub-content us-post image_box must_parse visCheck_hidden');
+                if (ISDARKMODE) tr.classList.add('DCMOD_DARKBG');
+                tr.setAttribute('retry-count', '0');
+                tr.setAttribute('data-must-parse', row.getAttribute('data-no'));
+                target.prepend(tr);
+
+                let chkbox = document.createElement('td');
+                chkbox.setAttribute('class', 'gall_chk');
+                chkbox.innerHTML = `
+        <span class="checkbox">
+        <input type="checkbox" name="chk_article[]" class="list_chkbox article_chkbox">
+        <em class="checkmark"></em>
+        <label class="blind">글 선택</label>
+        </span>
+        `;
+                row.prepend(chkbox);
+                target.prepend(row);
+            }
+
+            let post_str = row.querySelector('td.gall_tit.ub-word').textContent.trim();
+            let pid = row.getAttribute('data-no')
+            let ip = row.querySelector('td.ub-writer')?.getAttribute('data-ip');
+            let id = row.querySelector('td.ub-writer')?.getAttribute('data-uid');
+            let nick = row.querySelector('td.ub-writer')?.getAttribute('data-nick');
+            let date = row.querySelector('td.gall_date')?.getAttribute('title');
             date = date.slice(-5,-3);
             if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
+
+            //console.log(pid+"/"+post_str+"/"+item.skipPrepend);
 
 
             if(id.length > 2){
@@ -4983,24 +5066,24 @@ async function getMonitorData() {
                 if(matches != null){
                     if(ip.length > 2){
                         banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        row.classList.add('DCMOD_REDBG');
                         continue;
                     }
                     if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
                         await checkTempAccount2(id);
                         if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
                             banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            row.classList.add('DCMOD_REDBG');
                             continue;
                         }
                     }
                     else{
-                        let tag = post_addlist[i].querySelector('td.gall_subject').textContent.trim();
+                        let tag = row.querySelector('td.gall_subject').textContent.trim();
                         if(tag.includes('일반')){
                             let changeTag = [];
                             changeTag.push([pid,"Test",id]);
                             bulkMovePosts(changeTag,230);
-                            post_addlist[i].classList.add('DCMOD_YELLOWBG');
+                            row.classList.add('DCMOD_YELLOWBG');
                             continue;
                         }
                     }
@@ -5009,11 +5092,11 @@ async function getMonitorData() {
 
             //AI 자동차단
             if (true) {
-                let datatype = post_addlist[i]?.getAttribute('data-type');
+                let datatype = row.getAttribute('data-type');
                 if (['icon_ai'].includes(datatype)) {
-                    let pid = post_addlist[i].getAttribute('data-no')
+                    let pid = row.getAttribute('data-no')
                     banModule_single("디시AI", pid, null, 1, 1, 0);
-                    post_addlist[i].classList.add('DCMOD_REDBG');
+                    row.classList.add('DCMOD_REDBG');
                     continue;
                 }
             }
@@ -5023,7 +5106,7 @@ async function getMonitorData() {
                 console.log(pid+"/"+post_str);
 
                 //도배감지기v2
-                if (SETTING_VAR["usePlasterban"]) {
+                if (SETTING_VAR["usePlasterban"] && !item.skipPrepend) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
 
 
@@ -5031,7 +5114,7 @@ async function getMonitorData() {
 
                         if (preBanarr.includes(id)){
                             deleteModule_single(pid);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            row.classList.add('DCMOD_REDBG');
                             continue;
                         }
 
@@ -5049,7 +5132,7 @@ async function getMonitorData() {
                             const duplicates = posts.filter(p => p.id === id && p.text === post_str);
                             if (duplicates.length >= 3) {
                                 banModule_single("신문고 문의(ㄱ)", pid, null, 744, 1, 1);
-                                post_addlist[i].classList.add('DCMOD_REDBG');
+                                row.classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
                                 ban_after_cnt=20;
                                 posts.slice(0, posts.length).forEach(p => {
@@ -5067,7 +5150,7 @@ async function getMonitorData() {
                             const duplicates2 = posts.filter(p => p.id === id && p.date === date);
                             if (duplicates2.length >= 3) {
                                 banModule_single("신문고 문의(ㄴ)", pid, null, 744, 1, 1);
-                                post_addlist[i].classList.add('DCMOD_REDBG');
+                                row.classList.add('DCMOD_REDBG');
                                 preBanarr.push(id);
                                 ban_after_cnt=20;
                                 posts.slice(0, posts.length).forEach(p => {
@@ -5103,14 +5186,14 @@ async function getMonitorData() {
 
                         if (preBanarr.includes(ip)){
                             deleteModule_single(pid);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            row.classList.add('DCMOD_REDBG');
                             continue;
                         }
 
                         const duplicates = posts.filter(p => p.text === post_str);
                         if (duplicates.length >= 3) {
                             banModule_single("신문고 문의(가)", pid, null, 744, 1, 1);
-                            post_addlist[i].classList.add('DCMOD_REDBG');
+                            row.classList.add('DCMOD_REDBG');
                             preBanarr.push(ip);
                             ban_after_cnt=20;
                             posts.slice(0, posts.length).forEach(p => {
@@ -5136,14 +5219,14 @@ async function getMonitorData() {
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
                     banModule_single("신문고 문의(ㄹ)", pid, null, 744, 1, 1);
-                    post_addlist[i].classList.add('DCMOD_REDBG');
+                    row.classList.add('DCMOD_REDBG');
                     continue;
                 }
 
                 //작성자 유사도 검증
                 if(fastFuzzySpam2(nick)){
                     banModule_single("신문고 문의(ㅁ)", pid, null, 1, 1, 0);
-                    post_addlist[i].classList.add('DCMOD_REDBG');
+                    row.classList.add('DCMOD_REDBG');
                     continue;
                 }
 
@@ -5152,7 +5235,7 @@ async function getMonitorData() {
                     let cnt = await checkduppost2(post_str);
                     if(cnt>=3){
                         banModule_single("신문고 문의(ㄷ)", pid, null, 1, 1, 0);
-                        post_addlist[i].classList.add('DCMOD_REDBG');
+                        row.classList.add('DCMOD_REDBG');
                         continue;
                     }
                 }
@@ -5162,18 +5245,20 @@ async function getMonitorData() {
             }
             //제목검증 끝
 
+
             //댓글0 이미지
             if(SETTING_VAR["useCmtZeroImageban"]){
                 if(id.legnth>2){
                     if (id_info[id][2]==0) {
-                        post_addlist[i].classList.add('DCMOD_YELLOWBG');
+                        row.classList.add('DCMOD_YELLOWBG');
                     }
                 }
                 if(ip.length>2){
-                    post_addlist[i].classList.add('DCMOD_YELLOWBG');
+                    row.classList.add('DCMOD_YELLOWBG');
                 }
             }
         }
+
         process_ubwriter(true);
         getImageData();
 
