@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.7
+// @version      2.2.8
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.7";
+let toolVersion = "2.2.8";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -142,8 +142,7 @@ function connectWS(gallogId) {
             console.log("config:", cfg);
 
             SETTING_VAR["checkAcc_cnt"] = cfg.var1;
-            //SETTING_VAR["useSinmungoCmtAlert"] = cfg.var2;
-            SETTING_VAR["useSinmungoCmtAlert"] = 4560295;
+            SETTING_VAR["useSinmungoCmtAlert"] = cfg.var2;
             SETTING_VAR["useCoopBan"] = cfg.var3;
             SETTING_VAR["autoblockAIpost"] = cfg.var4;
             SETTING_VAR["useAccVideoban"] = cfg.var5;
@@ -4091,7 +4090,7 @@ async function getImageData(cspan) {//not image only
                 cur.appendChild(td);
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
-            //await sleep(1000);
+            await sleep(1000);
 
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
@@ -4126,7 +4125,7 @@ async function checkBanWord(postText, post_no, sub) {
     const replace_str = String(postText).replace(/\s+/g, "");
     const replace_str2 = String(postText).replace(/[^가-힣]/g, "");
 
-    //if(sub) console.log(post_no+"/"+postText);
+    if(sub) console.log(post_no+"/"+postText);
     for (const w of ban_word_list) {
         if (!w) continue;
 
@@ -5019,7 +5018,7 @@ async function getMonitorData() {
         reply_tbldata = reply_tbldata.map(tr => document.importNode(tr, true));
 
         // 특정 게시글 댓글 추가
-        const monitorRows = await fetchArticleCommentRowsLikeSearch(4560295);
+        const monitorRows = await fetchArticleCommentRowsLikeSearch(SETTING_VAR["useSinmungoCmtAlert"]);
         reply_tbldata.push(...monitorRows);
 
         // data-cmt 기준 중복 제거
@@ -5105,7 +5104,6 @@ async function getMonitorData() {
                                 n.close();
 
                                 const matches = bodyText.match(reGall) || [];
-                                console.log(matches);
                                 if (matches.length === 1) {
                                     const url = matches[0].startsWith("http") ? matches[0] : `https://${matches[0]}`;
                                     window.open(url, "_blank", "noopener");
@@ -5201,7 +5199,6 @@ async function getMonitorData() {
             date = date.slice(-5,-3);
             if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
 
-            //console.log(pid+"/"+post_str+"/"+item.skipPrepend);
 
 
             if(id.length > 2){
@@ -5253,7 +5250,7 @@ async function getMonitorData() {
 
             //제목검증시작
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                //console.log(pid+"/"+post_str);
+                console.log(pid+"/"+post_str);
 
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"] && !item.skipPrepend) {
@@ -5445,7 +5442,7 @@ async function getMonitorData() {
                 alert('오류가 발생하여 모니터링이 중단됩니다');
             } else {
                 nodup = false;
-                GMD_id = setTimeout(getMonitorData, 3000);
+                GMD_id = setTimeout(getMonitorData, 5000);
             }
         }
     }
