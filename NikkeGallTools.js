@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.8
+// @version      2.2.9
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.8";
+let toolVersion = "2.2.9";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4090,7 +4090,7 @@ async function getImageData(cspan) {//not image only
                 cur.appendChild(td);
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
-            await sleep(1000);
+            //await sleep(1000);
 
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
@@ -4654,8 +4654,8 @@ function isDcconUrl(url) {
 }
 
 function hasReferrerPolicyAttr(imgEl) {
-  if (!(imgEl instanceof HTMLImageElement)) return false;
-  return imgEl.hasAttribute("referrerpolicy");
+    if (!(imgEl instanceof HTMLImageElement)) return false;
+    return imgEl.hasAttribute("referrerpolicy");
 }
 
 //협동작전차단
@@ -4851,21 +4851,45 @@ async function fetchReplyRows(keyword) {
   return Array.from(doc?.querySelectorAll("table.gall_list > tbody > tr") ?? []);
 }*/
 
-function __shortTime(s) {
-    // "01.13 00:03:00" -> "00:03" 정도로 줄여주기(원하면 그대로 써도 됨)
-    const m = String(s || "").match(/\b(\d{2}):(\d{2})(?::\d{2})?\b/);
-    return m ? `${m[1]}:${m[2]}` : (s || "");
+function __timeHHMM(regDate) {
+    const m = String(regDate || "").match(/\b(\d{2}):(\d{2})/);
+    return m ? `${m[1]}:${m[2]}` : (regDate || "");
 }
 
-async function fetchArticleCommentRowsLikeSearch(articleNo) {
-    const gallId = $.getURLParam("id");
-    const gallTypeStr = GLOBAL_GALLERY_TYPESTR;
+function __asCmtTail(c_no) {
+    // 댓글이면 0/"0" → trailing "_" 유지 위해 빈 문자열
+    if (c_no === null || c_no === undefined) return "";
+    const s = String(c_no);
+    return (s === "0" || s.trim() === "") ? "" : s;
+}
 
-    // view에서 토큰 뽑기(네가 이미 성공한 로직 그대로)
+function __stripToText(memo) {
+    return String(memo || "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .trim();
+}
+
+// ✅ isSitting=true면 data-cmt에 "S_" prefix를 붙여 별도 스트림으로 분리
+async function fetchArticleCommentRowsLikeSearch_keepDcmt(articleNo, isSitting) {
+    let gallId = $.getURLParam("id");
+    let gallTypeStr = GLOBAL_GALLERY_TYPESTR;
+
+    if(isSitting){
+        gallId = "dororong";
+        gallTypeStr = "mgallery";
+    }
+    else{
+        gallId = $.getURLParam("id");
+        gallTypeStr = GLOBAL_GALLERY_TYPESTR;
+    }
+
+
+    // view에서 댓글 API 호출에 필요한 토큰 뽑기
     const viewUrl = `https://gall.dcinside.com/${gallTypeStr}/board/view?id=${encodeURIComponent(gallId)}&no=${articleNo}`;
     const viewResp = await fetch(viewUrl, { credentials: "include", cache: "no-store" });
-    const viewHtml = await viewResp.text();
-    const viewDoc = new DOMParser().parseFromString(viewHtml, "text/html");
+    const viewDoc = new DOMParser().parseFromString(await viewResp.text(), "text/html");
 
     const e_s_n_o = viewDoc.querySelector("#e_s_n_o")?.value || "";
     const board_type = viewDoc.querySelector("#board_type")?.value || "";
@@ -4873,8 +4897,7 @@ async function fetchArticleCommentRowsLikeSearch(articleNo) {
           viewDoc.querySelector("#_GALLTYPE_")?.value ||
           (gallTypeStr === "mgallery" ? "M" : "G");
 
-    // 댓글 API 페이지네이션(일단 1페이지만이면 while 제거해도 됨)
-    const all = [];
+    const rows = [];
     let page = 1;
 
     while (true) {
@@ -4907,81 +4930,68 @@ async function fetchArticleCommentRowsLikeSearch(articleNo) {
         const total = Number(json?.total_cnt || 0);
 
         if (!Array.isArray(comments) || comments.length === 0) break;
-        all.push(...comments);
 
-        if (total <= page * 100) break;
+        for (const c of comments) {
+            const parent = String(c?.parent ?? articleNo); // 게시글번호
+            const no = String(c?.no ?? "");
+            if (!no) continue;
+
+            const tail = __asCmtTail(c?.c_no);
+            const baseDcmt = `${parent}_${no}_${tail}`;
+
+            // ✅ 앉은문고는 prefix로 분리(기존 스트림과 충돌/비교 문제 방지)
+            const dataCmt = isSitting ? `S_${baseDcmt}` : baseDcmt;
+
+            const memoText = __stripToText(c?.memo) || "(내용없음)";
+            const time = __timeHHMM(c?.reg_date);
+
+            // ----- search_comment와 유사한 행 구조 생성 -----
+            const tr = document.createElement("tr");
+            tr.className = "search search_comment";
+            tr.setAttribute("data-cmt", dataCmt);
+
+            // td colspan=3 : sch_cmt
+            const tdCmt = document.createElement("td");
+            tdCmt.colSpan = 3;
+
+            const div = document.createElement("div");
+            div.className = "sch_cmt";
+
+            const a = document.createElement("a");
+            a.href = `https://gall.dcinside.com/${gallTypeStr}/board/view/?id=${encodeURIComponent(gallId)}&no=${parent}`;
+            a.target = "_blank";
+            a.textContent = memoText;
+
+            div.appendChild(a);
+            tdCmt.appendChild(div);
+
+            // writer td
+            const tdWriter = document.createElement("td");
+            tdWriter.className = "gall_writer ub-writer";
+            tdWriter.setAttribute("data-nick", c?.name || "");
+            tdWriter.setAttribute("data-uid", c?.user_id || "");
+            tdWriter.setAttribute("data-ip", c?.ip || "");
+
+            tdWriter.innerHTML = c?.gallog_icon
+                ? c.gallog_icon
+            : `<span class="nickname in"><em>${c?.name || "(익명)"}</em></span>`;
+
+            // date td
+            const tdDate = document.createElement("td");
+            tdDate.className = "gall_date";
+            tdDate.textContent = time;
+
+            // 빈 td 2개
+            const tdEmpty1 = document.createElement("td");
+            const tdEmpty2 = document.createElement("td");
+
+            tr.append(tdCmt, tdWriter, tdDate, tdEmpty1, tdEmpty2);
+            rows.push(tr);
+        }
+
+        if (total && page * 100 >= total) break;
+        if (!total && comments.length < 100) break;
         page++;
-    }
-
-    // "search_comment" 행 형식으로 만들기
-    const rows = [];
-    for (const c of all) {
-        const fcno = Number(c?.no ?? c?.comment_no ?? c?.c_no ?? 0);
-        if (!fcno) continue;
-
-        // fpno(부모댓글번호): 없으면 빈칸("")으로 두어 data-cmt가 "..._" 형태가 되게
-        const fpnoNum = Number(c?.p_no ?? c?.parent_no ?? c?.parent ?? c?.fpno ?? 0) || 0;
-        const fpno = fpnoNum ? String(fpnoNum) : ""; // ✅ 최상위 댓글이면 ""
-
-        const nick = c?.name || c?.nick || "";
-        const uid  = c?.user_id || "";
-        const ip   = c?.ip || "";
-        const time = __shortTime(c?.date || c?.reg_date || c?.regdate || "");
-
-        const raw = String(c?.memo || c?.comment || c?.content || "");
-        const text = raw
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]*>/g, "")
-        .replace(/&nbsp;/g, " ")
-        .trim() || (c?.dccon ? "[디시콘]" : "");
-
-        // ✅ 원래 reply_tbldata 행 구조 맞추기
-        const tr = document.createElement("tr");
-        tr.className = "search search_comment";
-        tr.setAttribute("data-cmt", `${articleNo}_${fcno}_${fpno}`); // fpno=""이면 끝에 '_' 유지됨
-
-        // 1) td colspan=3 (sch_cmt)
-        const tdCmtWrap = document.createElement("td");
-        tdCmtWrap.colSpan = 3;
-
-        const div = document.createElement("div");
-        div.className = "sch_cmt";
-
-        const a = document.createElement("a");
-        // 원본과 유사하게 view/?id=... 형태 + fcno/fpno 유지(네가 나중에 urlNew로 바꾸긴 함)
-        const href = `/${gallTypeStr}/board/view/?id=${encodeURIComponent(gallId)}&no=${articleNo}&s_type=search_comment&s_keyword=%2520&page=1&fcno=${fcno}&fpno=${fpno}`;
-        a.setAttribute("href", href);
-        a.textContent = text;
-
-        div.appendChild(a);
-        tdCmtWrap.appendChild(div);
-
-        // 2) writer td
-        const tdWriter = document.createElement("td");
-        tdWriter.className = "gall_writer ub-writer";
-        tdWriter.setAttribute("data-nick", nick);
-        if (uid) tdWriter.setAttribute("data-uid", uid);
-        else tdWriter.setAttribute("data-ip", ip);
-
-        const nickSpan = document.createElement("span");
-        nickSpan.className = "nickname in";
-        nickSpan.title = nick;
-        const em = document.createElement("em");
-        em.textContent = nick || "(익명)";
-        nickSpan.appendChild(em);
-        tdWriter.appendChild(nickSpan);
-
-        // 3) date td
-        const tdDate = document.createElement("td");
-        tdDate.className = "gall_date";
-        tdDate.textContent = time;
-
-        // 4) 빈 td 2개(원본 구조 맞춤)
-        const tdEmpty1 = document.createElement("td");
-        const tdEmpty2 = document.createElement("td");
-
-        tr.append(tdCmtWrap, tdWriter, tdDate, tdEmpty1, tdEmpty2);
-        rows.push(tr);
     }
 
     return rows;
@@ -5002,24 +5012,22 @@ async function getMonitorData() {
         nodup = true;
         let target = document.querySelector('table.gall_list').querySelector('tbody');
 
-
-        /*
         let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=%2520`, { credentials: 'include' });
         var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
-        let reply_tbldata = reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr');*/
 
-        let reply_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}&s_type=search_comment&s_keyword=%2520`, { credentials: 'include' });
-        var reply_data = new DOMParser().parseFromString(await reply_resp.text(), "text/html");
         let reply_tbldata = Array.from(
             reply_data?.querySelector('table.gall_list')?.querySelectorAll('tbody tr') ?? []
         );
-
-
         reply_tbldata = reply_tbldata.map(tr => document.importNode(tr, true));
 
-        // 특정 게시글 댓글 추가
-        const monitorRows = await fetchArticleCommentRowsLikeSearch(SETTING_VAR["useSinmungoCmtAlert"]);
+        // 신문고 게시글 댓글 추가
+        const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
         reply_tbldata.push(...monitorRows);
+
+        // 앉은문고 게시글 댓글 추가
+        const SITTING_NO = 99;
+        const monitorRows2 = await fetchArticleCommentRowsLikeSearch_keepDcmt(SITTING_NO, true);
+        reply_tbldata.push(...monitorRows2);
 
         // data-cmt 기준 중복 제거
         const seen = new Set();
@@ -5031,82 +5039,128 @@ async function getMonitorData() {
             return true;
         });
 
+        let GMD_LATEST_REPLY_SINMUNGO = Number(GM_getValue?.("GMD_LATEST_REPLY_SINMUNGO", 0) ?? 0);
+
         let reply_addlist = [];
         let r_id_max = GMD_LATEST_REPLY;
+        let r_id_max_s = GMD_LATEST_REPLY_SINMUNGO;
+
         for (let cur of reply_tbldata) {
-            if (cur.getAttribute('data-cmt') != null) {
-                let reply_dcmt = cur.getAttribute('data-cmt').split('_');
-                let reply_id = Number(reply_dcmt[1]);
-                if (GMD_LATEST_REPLY < reply_id) {
+            const dcmtRaw = cur.getAttribute('data-cmt');
+            if (!dcmtRaw) continue;
+
+            let isSitting = false;
+            let dcmt = dcmtRaw;
+            if (dcmt.startsWith("S_")) {
+                isSitting = true;
+                dcmt = dcmt.slice(2); // "S_" 제거 후 기존 포맷으로 처리
+            }
+
+            let reply_dcmt = dcmt.split('_');          // [parentNo, replyNo, tail]
+            let reply_id = Number(reply_dcmt[1]);
+            if (!Number.isFinite(reply_id)) continue;
+
+            const latestBase = isSitting ? GMD_LATEST_REPLY_SINMUNGO : GMD_LATEST_REPLY;
+            if (latestBase < reply_id) {
+
+                // max 갱신도 분리
+                if (!isSitting) {
                     if (r_id_max < reply_id) r_id_max = reply_id;
-                    if (cur.querySelector('span.mark') != null) {
-                        cur.querySelector('div.sch_cmt a').textContent = cur.querySelector('div.sch_cmt a').textContent;
-                    }
-                    if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) {
-                        let DCMOD_IDB_rTRANSACTION = DCMOD_IDB.transaction(['reply'], 'readwrite');
-                        let DCMOD_IDB_rstore = DCMOD_IDB_rTRANSACTION.objectStore('reply');
-                        //save reply to idb
-                        let cur_writerinfo = cur.querySelector('td.gall_writer.ub-writer');
-                        let wid = cur_writerinfo.getAttribute('data-uid');
-                        if (wid == null || wid.length == 0) wid = cur_writerinfo.getAttribute('data-ip');
-                        const item = {
-                            rno: Number(reply_dcmt[1]),
-                            no: Number(reply_dcmt[0]),
-                            writerNick: cur_writerinfo.getAttribute('data-nick'),
-                            writerId: wid,
-                            rtype: 'T',
-                            rdata: cur.querySelector('div.sch_cmt a').textContent.trim()
-                        }
-                        const isDup = DCMOD_IDB_rstore.get(reply_dcmt[1]);
-                        isDup.onsuccess = (e) => {
-                            if (!isDup.result) {
+                } else {
+                    if (r_id_max_s < reply_id) r_id_max_s = reply_id;
+                }
+
+                // 원래 코드 그대로
+                if (cur.querySelector('span.mark') != null) {
+                    cur.querySelector('div.sch_cmt a').textContent = cur.querySelector('div.sch_cmt a').textContent;
+                }
+
+                if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) {
+                    let DCMOD_IDB_rTRANSACTION = DCMOD_IDB.transaction(['reply'], 'readwrite');
+                    let DCMOD_IDB_rstore = DCMOD_IDB_rTRANSACTION.objectStore('reply');
+
+                    let cur_writerinfo = cur.querySelector('td.gall_writer.ub-writer');
+                    let wid = cur_writerinfo.getAttribute('data-uid');
+                    if (wid == null || wid.length == 0) wid = cur_writerinfo.getAttribute('data-ip');
+
+                    const item = {
+                        rno: Number(reply_dcmt[1]),
+                        no: Number(reply_dcmt[0]),
+                        writerNick: cur_writerinfo.getAttribute('data-nick'),
+                        writerId: wid,
+                        rtype: 'T',
+                        rdata: cur.querySelector('div.sch_cmt a').textContent.trim()
+                    };
+
+                    const idbKey = isSitting ? `S_${reply_dcmt[1]}` : reply_dcmt[1];
+
+                    const isDup = DCMOD_IDB_rstore.get(idbKey);
+                    isDup.onsuccess = (e) => {
+                        if (!isDup.result) {
+                            try {
+                                DCMOD_IDB_rstore.put(item, idbKey);
+                            } catch {
                                 DCMOD_IDB_rstore.add(item);
-                                console.log(`Added (${item.rno}) - ${item.writerNick} - ${item.writerId} - ${item.rtype} - ${item.rdata}`);
                             }
+                            console.log(`Added (${item.rno}) - ${item.writerNick} - ${item.writerId} - ${item.rtype} - ${item.rdata}`);
                         }
-                    }
-                    let aLink = cur.querySelector('div.sch_cmt a');
-                    let linkUrl = aLink.getAttribute('href');
-                    if (linkUrl.startsWith('/')) linkUrl = `${location.origin}${linkUrl}`;
-                    let oldUrl = new URL(linkUrl);
-                    let urlNew = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${oldUrl.searchParams.get('id')}&no=${oldUrl.searchParams.get('no')}`;
-                    aLink.setAttribute('href', urlNew);
-                    aLink.setAttribute('target', '_blank');
-                    //add nickname click event
-                    let nickclicks = cur.querySelector('span.nickname');
-                    nickclicks.addEventListener('click', function(e) { get_user_data(e.target); });
-                    let chkbox = document.createElement('td');
-                    chkbox.setAttribute('class', 'gall_chk');
-                    chkbox.innerHTML = `
-                    <span class="checkbox">
-                    <input type="checkbox" name="chk_comment[]" class="list_chkbox article_chkbox">
-                    <em class="checkmark"></em>  <label class="blind">댓글 선택</label>
-                    </span>
-                    `;
-                    cur.prepend(chkbox);
-                    reply_addlist.push(cur);
+                    };
+                }
 
-                    //신문고댓글강조
-                    if(SETTING_VAR["useSinmungoCmtAlert"] > 0 && sinmunAlert){
-                        if(oldUrl.searchParams.get('no') == SETTING_VAR["useSinmungoCmtAlert"]){
-                            cur.classList.add('DCMOD_YELLOWBG');
+                let aLink = cur.querySelector('div.sch_cmt a');
+                let linkUrl = aLink.getAttribute('href');
+                if (linkUrl.startsWith('/')) linkUrl = `${location.origin}${linkUrl}`;
+                let oldUrl = new URL(linkUrl);
 
-                            const titleEl = cur.querySelector('td.gall_writer.ub-writer');
-                            const bodyText = cur.querySelector('div.sch_cmt a')?.textContent?.trim() ?? "";
-                            const n = new Notification(
-                                `${titleEl.getAttribute('data-nick')}(${titleEl.getAttribute('data-uid')})`,
-                                { body: bodyText, silent: false }
-                            );
+                let urlNew = `https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${oldUrl.searchParams.get('id')}&no=${oldUrl.searchParams.get('no')}`;
+                aLink.setAttribute('href', urlNew);
+                aLink.setAttribute('target', '_blank');
 
-                            const reGall = /https:\/\/gall\.dcinside\.com\/(?:(?:mgallery\/)?board\/view\/\?id=[^&\s#]+&no=|[A-Za-z0-9_-]+\/)\d{7}/g;
-                            n.onclick = (e) => {
-                                e.preventDefault();
-                                n.close();
+                let nickclicks = cur.querySelector('span.nickname');
+                nickclicks.addEventListener('click', function (e) { get_user_data(e.target); });
 
-                                const matches = bodyText.match(reGall) || [];
-                                if (matches.length === 1) {
-                                    const url = matches[0].startsWith("http") ? matches[0] : `https://${matches[0]}`;
-                                    window.open(url, "_blank", "noopener");
+                let chkbox = document.createElement('td');
+                chkbox.setAttribute('class', 'gall_chk');
+                chkbox.innerHTML = `
+            <span class="checkbox">
+            <input type="checkbox" name="chk_comment[]" class="list_chkbox article_chkbox">
+            <em class="checkmark"></em>  <label class="blind">댓글 선택</label>
+            </span>
+        `;
+                cur.prepend(chkbox);
+                reply_addlist.push(cur);
+
+
+                const highlightNo = isSitting ? SITTING_NO : SETTING_VAR["useSinmungoCmtAlert"];
+
+                if (highlightNo > 0 && sinmunAlert) {
+                    if (Number(oldUrl.searchParams.get('no')) === Number(highlightNo)) {
+                        cur.classList.add('DCMOD_YELLOWBG');
+
+                        const titleEl = cur.querySelector('td.gall_writer.ub-writer');
+                        const bodyText = cur.querySelector('div.sch_cmt a')?.textContent?.trim() ?? "";
+
+                        const n = new Notification(
+                            `${titleEl.getAttribute('data-nick')}(${titleEl.getAttribute('data-uid')})`,
+                            { body: bodyText, silent: false }
+                        );
+
+                        const reGall = /https:\/\/gall\.dcinside\.com\/(?:(?:mgallery\/)?board\/view\/\?id=[^&\s#]+&no=|[A-Za-z0-9_-]+\/)\d{7}/g;
+                        n.onclick = (e) => {
+                            e.preventDefault();
+                            n.close();
+
+                            const matches = bodyText.match(reGall) || [];
+                            if (matches.length === 1) {
+                                const url = matches[0].startsWith("http") ? matches[0] : `https://${matches[0]}`;
+                                window.open(url, "_blank", "noopener");
+                            } else {
+                                if (isSitting) {
+                                    window.open(
+                                        "https://gall.dcinside.com/dororong/99",
+                                        "_blank",
+                                        "noopener"
+                                    );
                                 } else {
                                     window.open(
                                         `https://gall.dcinside.com/gov/${SETTING_VAR["useSinmungoCmtAlert"]}`,
@@ -5114,15 +5168,25 @@ async function getMonitorData() {
                                         "noopener"
                                     );
                                 }
-                            };
-                        }
+                            }
+                        };
                     }
                 }
             }
         }
+
         sinmunAlert = true;
+
+        // ✅ 일반 최신값 갱신(기존 유지)
         if (GMD_LATEST_REPLY < r_id_max) GMD_LATEST_REPLY = r_id_max;
-        for (let i=reply_addlist.length-1; i>=0; i--) {
+
+        // ✅ 앉은문고 최신값 갱신(별도)
+        if (GMD_LATEST_REPLY_SINMUNGO < r_id_max_s) {
+            GMD_LATEST_REPLY_SINMUNGO = r_id_max_s;
+            GM_setValue?.("GMD_LATEST_REPLY_SINMUNGO", String(GMD_LATEST_REPLY_SINMUNGO));
+        }
+
+        for (let i = reply_addlist.length - 1; i >= 0; i--) {
             target.prepend(reply_addlist[i]);
         }
         let post_resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/lists/?id=${$.getURLParam('id')}`, { credentials: 'include' });
