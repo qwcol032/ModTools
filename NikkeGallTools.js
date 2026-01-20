@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.2.9
+// @version      2.3.0
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.2.9";
+let toolVersion = "2.3.0";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4086,8 +4086,12 @@ async function getImageData(cspan) {//not image only
 
 
             if (td.innerHTML.trim().length > 0 && !cur.classList.contains("already")) {
+                if(cur.classList.contains("rechk")){
+                    console.log(post_no+"/"+post_str);
+                }
                 cur.classList.add("already");
                 cur.appendChild(td);
+
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
             //await sleep(1000);
@@ -4125,7 +4129,7 @@ async function checkBanWord(postText, post_no, sub) {
     const replace_str = String(postText).replace(/\s+/g, "");
     const replace_str2 = String(postText).replace(/[^가-힣]/g, "");
 
-    if(sub) console.log(post_no+"/"+postText);
+    //if(sub) console.log(post_no+"/"+postText);
     for (const w of ban_word_list) {
         if (!w) continue;
 
@@ -5314,8 +5318,10 @@ async function getMonitorData() {
 
             //제목검증시작
             if(ip.length>2 || id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                console.log(pid+"/"+post_str);
-
+                if (!item.skipPrepend){
+                    console.log(pid+"/"+post_str);
+                }
+               
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"] && !item.skipPrepend) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
