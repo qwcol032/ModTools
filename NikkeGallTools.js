@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.0
+// @version      2.3.1
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.0";
+let toolVersion = "2.3.1";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4058,7 +4058,7 @@ async function getImageData(cspan) {//not image only
                 }
 
                 // 이미지 유사도 검증
-                processImage(img, post_no);
+                processImage(img, post_no,cur.classList.contains("already"));
 
                 ipImageBan(post_no);
 
@@ -4162,13 +4162,13 @@ async function ipImageBan(post_no){
 
 //이미지 유사도 차단
 const ANIM_FRAME_PICK = "sample3";
-async function processImage(imgEl, post_no) {
+async function processImage(imgEl, post_no, chk) {
     if (!imgEl) return false;
     const url = getImgUrl(imgEl);
-    return processMediaUrlTry(url, post_no).catch(() => false);
+    return processMediaUrlTry(url, post_no, chk).catch(() => false);
 }
 
-async function processMediaUrlTry(url, post_no) {
+async function processMediaUrlTry(url, post_no, chk) {
     if (!url) return false;
 
     const row = document.querySelector(`tr.ub-content.us-post[data-no="${post_no}"]`);
@@ -4193,7 +4193,7 @@ async function processMediaUrlTry(url, post_no) {
     }
 
     if (!dhList.length || !Image_BAN_BITS.length) return false;
-    console.log(post_no+"/"+dhList);
+    if(!chk) console.log(post_no+"/"+dhList);
 
     const th = Image_THRESHOLD;
     for (const dhHex of dhList) {
