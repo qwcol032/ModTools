@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.1
+// @version      2.3.2
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.1";
+let toolVersion = "2.3.2";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -5001,6 +5001,171 @@ async function fetchArticleCommentRowsLikeSearch_keepDcmt(articleNo, isSitting) 
     return rows;
 }
 
+
+function buildDupSpamBanTargets(reply_tbldata, id_info, SETTING_VAR) {
+    const THRESHOLD = 3;
+    const checkAccCnt = Number(SETTING_VAR?.["checkAcc_cnt"] ?? 0);
+
+    // === 전역 메모리(페이지 살아있는 동안 유지) ===
+    // key: `${authorKey}|${bodyText}`
+    // value: expireAtCall (현재 호출 번호 기준 +5)
+    const MEM = (window.__DCMOD_DUP_SPAM_MEM__ ||= { callNo: 0, map: new Map() });
+
+    // 이번 호출 번호 증가 + 만료 정리
+    MEM.callNo++;
+    for (const [k, expAt] of MEM.map.entries()) {
+        if (MEM.callNo > expAt) MEM.map.delete(k);
+    }
+
+    const banTargets = [];
+    const deleteTargets = [];
+
+    // 중복 방지
+    const banKeySet = new Set();     // `${postNo}_${replyNo}`
+    const delKeySet = new Set();     // `${postNo}_${replyNo}`
+
+    // bodyText -> 그룹 (작성자 단일 여부 체크)
+    const groupMap = new Map();
+
+    // 1) 1회 스캔
+    for (const cur of reply_tbldata) {
+        const dcmtRaw = cur.getAttribute("data-cmt");
+        if (!dcmtRaw) continue;
+
+        const dcmt = dcmtRaw.startsWith("S_") ? dcmtRaw.slice(2) : dcmtRaw;
+        const parts = dcmt.split("_");               // [postNo, replyNo, ...]
+        const postNo = Number(parts[0]);
+        const replyNo = Number(parts[1]);
+        if (!Number.isFinite(postNo) || !Number.isFinite(replyNo)) continue;
+
+        const aLink = cur.querySelector("div.sch_cmt a");
+        if (!aLink) continue;
+        const bodyText = (aLink.textContent || "").trim();
+        if (!bodyText) continue;
+
+        const writerEl = cur.querySelector("td.gall_writer.ub-writer");
+        if (!writerEl) continue;
+
+        const uid = writerEl.getAttribute("data-uid");
+        const ip = writerEl.getAttribute("data-ip");
+        const isUid = !!uid && uid.length > 0;
+        const wid = isUid ? uid : ip;
+        if (!wid || wid.length === 0) continue;
+
+        // UID/IP 구분해두면 충돌 방지됨 (요구사항과 충돌 없음)
+        const authorKey = (isUid ? "U:" : "I:") + wid;
+
+        // (3) 메모리 기반 즉시 삭제: ban된 댓글과 동일(작성자+본문)인 경우
+        const memKey = `${authorKey}|${bodyText}`;
+        if (MEM.map.has(memKey)) {
+            const k = `${postNo}_${replyNo}`;
+            if (!delKeySet.has(k)) {
+                delKeySet.add(k);
+                deleteTargets.push({ postNo, replyNo, wid, authorKey, bodyText, reason: "memory_match" });
+            }
+            // 메모리 매치는 그룹 판단과 별개로 삭제만 예약
+            continue;
+        }
+
+        // (1)(2) 도배 그룹용 집계
+        let g = groupMap.get(bodyText);
+        if (!g) {
+            g = {
+                count: 0,
+                authorKey,
+                wid,
+                isUid,
+                sameAuthor: true,
+                items: [],
+                maxReplyNo: -Infinity,
+                maxItem: null,
+            };
+            groupMap.set(bodyText, g);
+        } else {
+            if (g.authorKey !== authorKey) g.sameAuthor = false;
+        }
+
+        g.count++;
+        const item = { postNo, replyNo, wid, authorKey, bodyText };
+        g.items.push(item);
+
+        if (replyNo > g.maxReplyNo) {
+            g.maxReplyNo = replyNo;
+            g.maxItem = item;
+        }
+    }
+
+    // 2) 그룹 평가 -> 최신 1개만 ban, 나머지 delete
+    for (const [bodyText, g] of groupMap.entries()) {
+        if (g.count < THRESHOLD) continue;
+        if (!g.sameAuthor) continue;
+
+        // UID / IP 여부에 따라 ban 조건
+        let shouldBan = false;
+
+        if (!g.isUid) {
+            // IP 기반이면 id_info 체크 없이 즉시 ban
+            shouldBan = true;
+        } else {
+            // UID 기반이면 id_info 조건 체크
+            const accVal = id_info?.[g.wid]?.[0];
+            if (typeof accVal === "number" && accVal < checkAccCnt) {
+                shouldBan = true;
+            }
+        }
+
+        if (!shouldBan) continue;
+
+        const latest = g.maxItem;
+        if (!latest) continue;
+
+        // 최신 replyNo 1개만 차단
+        const banK = `${latest.postNo}_${latest.replyNo}`;
+        if (!banKeySet.has(banK)) {
+            banKeySet.add(banK);
+            banTargets.push({ ...latest, reason: "dup_spam_latest" });
+        }
+
+        // 나머지는 삭제(단, 최신은 banModule_single(delete_it=1)이 처리하니 중복 삭제 제외)
+        for (const it of g.items) {
+            const k = `${it.postNo}_${it.replyNo}`;
+            if (k === banK) continue;
+            if (delKeySet.has(k)) continue;
+            delKeySet.add(k);
+            deleteTargets.push({ ...it, reason: "dup_spam_older" });
+        }
+
+        // (3) 메모리 등록: ban된 댓글의 본문+작성자 -> 앞으로 5회 호출 동안 동일 댓글은 즉시 삭제
+        const memKey = `${g.authorKey}|${bodyText}`;
+        MEM.map.set(memKey, MEM.callNo + 5);
+    }
+
+    // ban 대상이 deleteTargets에 섞여 있으면 제거 (안전)
+    const banSet = new Set(banTargets.map(t => `${t.postNo}_${t.replyNo}`));
+    const finalDeleteTargets = deleteTargets.filter(t => !banSet.has(`${t.postNo}_${t.replyNo}`));
+
+    return { banTargets, deleteTargets: finalDeleteTargets };
+}
+
+/** 실행기: 최신 1개 ban -> 나머지 delete */
+async function runDupSpamActions(plan) {
+    // 1) 차단 먼저 (delete_it=1 이라 해당 댓글은 같이 삭제될 가능성이 큼)
+    for (const t of plan.banTargets) {
+        try {
+            await banModule_single("신문고 문의(ㅊ)", t.postNo, t.replyNo, 744, 1, 1);
+        } catch (e) {
+        }
+    }
+
+    // 2) 나머지 삭제
+    for (const t of plan.deleteTargets) {
+        try {
+            await deleteModule_single(t.postNo, t.replyNo);
+        } catch (e) {
+        }
+    }
+}
+
 const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![A-Za-z0-9])/g; //협동작전 정규식
 
 let lastId;
@@ -5043,6 +5208,13 @@ async function getMonitorData() {
             return true;
         });
 
+        //댓글 도배 차단
+        if(SETTING_VAR["usePlasterban"])
+        {
+            const plan = buildDupSpamBanTargets(reply_tbldata, id_info, SETTING_VAR);
+            await runDupSpamActions(plan);
+        }
+
         let GMD_LATEST_REPLY_SINMUNGO = Number(GM_getValue?.("GMD_LATEST_REPLY_SINMUNGO", 0) ?? 0);
 
         let reply_addlist = [];
@@ -5077,38 +5249,6 @@ async function getMonitorData() {
                 // 원래 코드 그대로
                 if (cur.querySelector('span.mark') != null) {
                     cur.querySelector('div.sch_cmt a').textContent = cur.querySelector('div.sch_cmt a').textContent;
-                }
-
-                if (SETTING_VAR['useIdxDB'] == true && DCMOD_IDB != undefined) {
-                    let DCMOD_IDB_rTRANSACTION = DCMOD_IDB.transaction(['reply'], 'readwrite');
-                    let DCMOD_IDB_rstore = DCMOD_IDB_rTRANSACTION.objectStore('reply');
-
-                    let cur_writerinfo = cur.querySelector('td.gall_writer.ub-writer');
-                    let wid = cur_writerinfo.getAttribute('data-uid');
-                    if (wid == null || wid.length == 0) wid = cur_writerinfo.getAttribute('data-ip');
-
-                    const item = {
-                        rno: Number(reply_dcmt[1]),
-                        no: Number(reply_dcmt[0]),
-                        writerNick: cur_writerinfo.getAttribute('data-nick'),
-                        writerId: wid,
-                        rtype: 'T',
-                        rdata: cur.querySelector('div.sch_cmt a').textContent.trim()
-                    };
-
-                    const idbKey = isSitting ? `S_${reply_dcmt[1]}` : reply_dcmt[1];
-
-                    const isDup = DCMOD_IDB_rstore.get(idbKey);
-                    isDup.onsuccess = (e) => {
-                        if (!isDup.result) {
-                            try {
-                                DCMOD_IDB_rstore.put(item, idbKey);
-                            } catch {
-                                DCMOD_IDB_rstore.add(item);
-                            }
-                            console.log(`Added (${item.rno}) - ${item.writerNick} - ${item.writerId} - ${item.rtype} - ${item.rdata}`);
-                        }
-                    };
                 }
 
                 let aLink = cur.querySelector('div.sch_cmt a');
