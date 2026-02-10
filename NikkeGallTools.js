@@ -5294,7 +5294,10 @@ async function getMonitorData() {
 
         // 신문고 게시글 댓글 추가
         const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
-        await banIfTop3NewestSameAuthor(monitorRows);
+
+        if(SETTING_VAR["useCoopBan"]){
+            await banIfTop3NewestSameAuthor(monitorRows);
+        }
         reply_tbldata.push(...monitorRows);
 
         // 앉은문고 게시글 댓글 추가
