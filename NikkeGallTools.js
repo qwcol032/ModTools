@@ -5295,7 +5295,7 @@ async function getMonitorData() {
         // 신문고 게시글 댓글 추가
         const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
 
-        if(SETTING_VAR["useCoopBan"]){
+        if(SETTING_VAR["usePlasterban"]){
             await banIfTop3NewestSameAuthor(monitorRows);
         }
         reply_tbldata.push(...monitorRows);
