@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.2
+// @version      2.3.4
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.2";
+let toolVersion = "2.3.4";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4059,7 +4059,6 @@ async function getImageData(cspan) {//not image only
 
                 // 이미지 유사도 검증
                 processImage(img, post_no,cur.classList.contains("already"));
-
                 ipImageBan(post_no);
 
             }
@@ -4068,7 +4067,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids1);
                     curvids1.onload = () => iframeResizer(curvids1);
 
-                    processIframeEl(curvids1, post_no);
+                    processIframeEl(curvids1, post_no, post_no,cur.classList.contains("already"));
                     ipImageBan(post_no);
                 }
             }
@@ -4079,7 +4078,8 @@ async function getImageData(cspan) {//not image only
                     curvids2.removeAttribute('style');
                     td.appendChild(curvids2);
 
-                    processVideoEl(curvids2, post_no);
+
+                    processVideoEl(curvids2, post_no, post_no,cur.classList.contains("already"));
                     ipImageBan(post_no);
                 }
             }
@@ -4126,7 +4126,7 @@ async function checkBanWord(postText, post_no, sub) {
         if (id_info[id]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
     }
 
-    const replace_str = String(postText).replace(/\s+/g, "");
+    const replace_str = String(postText).replace(/\s+/g, "").toLowerCase();
     const replace_str2 = String(postText).replace(/[^가-힣]/g, "");
 
     //if(sub) console.log(post_no+"/"+postText);
@@ -4339,7 +4339,7 @@ async function getDhashListFromVideoArrayBuffer(ab, contentType, pick = "sample3
     }
 }
 
-async function processIframeEl(iframeEl, post_no) {
+async function processIframeEl(iframeEl, post_no, chk) {
     const src = iframeEl?.src;
     if (!src) return;
 
@@ -4348,7 +4348,7 @@ async function processIframeEl(iframeEl, post_no) {
     const mediaUrl = await resolveIframeToMediaUrl(src);
     if (!mediaUrl) return;
 
-    return processMediaUrlTry(mediaUrl, post_no);
+    return processMediaUrlTry(mediaUrl, post_no, chk);
 }
 
 function getVideoUrl(videoEl) {
@@ -4372,7 +4372,7 @@ function normalizeUrl(u) {
     try { return new URL(u, location.href).toString(); } catch { return ""; }
 }
 
-async function processVideoEl(videoEl, post_no) {
+async function processVideoEl(videoEl, post_no, chk) {
     if (!videoEl) return;
 
     const urlWebpLike = normalizeUrl(videoEl.getAttribute("data-src"));
@@ -4380,13 +4380,13 @@ async function processVideoEl(videoEl, post_no) {
 
     // 1) data-src 먼저 (ImageDecoder 경로로 움짤 webp 처리 가능)
     if (urlWebpLike) {
-        const ok = await processMediaUrlTry(urlWebpLike, post_no);
+        const ok = await processMediaUrlTry(urlWebpLike, post_no, chk);
         if (ok) return;
     }
 
     // 2) 그 다음 mp4 시도
     if (urlMp4) {
-        await processMediaUrlTry(urlMp4, post_no);
+        await processMediaUrlTry(urlMp4, post_no, chk);
     }
 }
 
@@ -5166,6 +5166,109 @@ async function runDupSpamActions(plan) {
     }
 }
 
+function __extractAuthorKeyFromRow(tr) {
+    const w = tr?.querySelector("td.gall_writer.ub-writer, td.gall_writer");
+    if (!w) return null;
+
+    const uid = (w.getAttribute("data-uid") || "").trim();
+    const ip  = (w.getAttribute("data-ip")  || "").trim();
+
+    if (uid) return { type: "uid", id: uid };
+    if (ip)  return { type: "ip",  id: ip  };
+    return null;
+}
+
+// data-cmt -> { postNo, replyNo, uniq }  (S_면 null)
+function __parseDataCmt(dataCmt) {
+    if (!dataCmt) return null;
+    if (dataCmt.startsWith("S_")) return null; // isSitting=false 전용
+
+    const parts = String(dataCmt).split("_");
+    if (parts.length < 2) return null;
+
+    const postNo = parts[0];
+    const replyNo = parts[1];
+    const uniq = Number(replyNo);
+
+    if (!postNo || !replyNo || !Number.isFinite(uniq)) return null;
+    return { postNo, replyNo, uniq };
+}
+
+async function banIfTop3NewestSameAuthor(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return { checked: false, matched: false, banned: false };
+    }
+
+    // 1) S_ 제외 + data-cmt 파싱 가능한 것만 모으기
+    const parsed = [];
+    for (const tr of rows) {
+        const dcmt = tr?.getAttribute("data-cmt") || "";
+        const info = __parseDataCmt(dcmt);
+        if (!info) continue;
+        parsed.push({ tr, ...info });
+    }
+
+    if (parsed.length < 3) {
+        return { checked: false, matched: false, banned: false };
+    }
+
+    // 2) 고유인덱스(uniq) 큰 순으로 3개 선택
+    parsed.sort((a, b) => b.uniq - a.uniq);
+    const top3 = parsed.slice(0, 3);
+
+    // 3) 작성자 키 추출 및 동일성 검사
+    const a0 = __extractAuthorKeyFromRow(top3[0].tr);
+    const a1 = __extractAuthorKeyFromRow(top3[1].tr);
+    const a2 = __extractAuthorKeyFromRow(top3[2].tr);
+
+    if (!a0 || !a1 || !a2) {
+        return { checked: true, matched: false, banned: false };
+    }
+
+    const same =
+          a0.type === a1.type &&
+          a1.type === a2.type &&
+          a0.id === a1.id &&
+          a1.id === a2.id;
+
+    if (!same) {
+        return { checked: true, matched: false, banned: false };
+    }
+
+
+    // 차단에 사용할 postNo/replyNo는 "가장 최신(uniq 최대)" 댓글 기준
+    const target = { postNo: top3[0].postNo, replyNo: top3[0].replyNo, uniq: top3[0].uniq };
+
+    // 4) 차단 조건 분기
+    if (a0.type === "ip") {
+        await banModule_single("도배", target.postNo, target.replyNo, 744, 1, 1);
+        return { checked: true, matched: true, banned: true, type: "ip", id: a0.id, target };
+    }
+
+    // uid
+    const id = a0.id;
+
+    if (id_info[id] == undefined) {
+        await checkTempAccount(id);
+    }
+
+    const accCnt = id_info[id][0];
+    const limit = SETTING_VAR["checkAcc_cnt"];
+
+    // 데이터가 없으면 오탐 방지 위해 차단 안 함
+    if (!Number.isFinite(accCnt) || !Number.isFinite(limit)) {
+        return { checked: true, matched: true, banned: false, type: "uid", id, target };
+    }
+
+    if (accCnt < limit) {
+        await banModule_single("도배", target.postNo, target.replyNo, 744, 1, 1);
+        return { checked: true, matched: true, banned: true, type: "uid", id, target };
+    }
+
+    return { checked: true, matched: true, banned: false, type: "uid", id, target };
+}
+
+
 const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![A-Za-z0-9])/g; //협동작전 정규식
 
 let lastId;
@@ -5191,6 +5294,7 @@ async function getMonitorData() {
 
         // 신문고 게시글 댓글 추가
         const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
+        await banIfTop3NewestSameAuthor(monitorRows);
         reply_tbldata.push(...monitorRows);
 
         // 앉은문고 게시글 댓글 추가
