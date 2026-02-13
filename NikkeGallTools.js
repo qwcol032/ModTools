@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.4
+// @version      2.3.5
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.4";
+let toolVersion = "2.3.5";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -151,6 +151,7 @@ function connectWS(gallogId) {
             SETTING_VAR["iplmageBan"] = cfg.var18;
             SETTING_VAR["useWordBan"] = cfg.var20;
             SETTING_VAR["reverseMode"] = cfg.var22;
+            SETTING_VAR["ServerError"] = cfg.var23;
 
             if (toolVersion != cfg.var12 && flagAlert && !gallMonitorON) {
                 alert(
@@ -919,6 +920,7 @@ if (SETTING_VAR == undefined) {
     SETTING_VAR["iplmageBan"] = false;
     SETTING_VAR["useWordBan"] = false;
     SETTING_VAR["reverseMode"] = false;
+    SETTING_VAR["ServerError"] = false;
 
     await GM.setValue('SETTING', SETTING_VAR);
 }
@@ -956,6 +958,7 @@ await settingundefchecker("checkCircuitPost", false);
 await settingundefchecker("iplmageBan", false);
 await settingundefchecker("useWordBan", false);
 await settingundefchecker("reverseMode", false);
+await settingundefchecker("ServerError", false);
 
 
 //dcinside 04xx 30->31d fix
@@ -3987,7 +3990,7 @@ async function getImageData(cspan) {//not image only
     }
     for (let cur of mparse) {
         try {
-            if (Number(cur.getAttribute('retry-count')) >= 3) continue;
+            if (Number(cur.getAttribute('retry-count'))>=3) continue;
             if (gallMonitorON == false) break;
             let post_no = cur.getAttribute('data-must-parse');
 
@@ -4004,8 +4007,15 @@ async function getImageData(cspan) {//not image only
                   (id_info[tid] !== undefined) &&
                   (id_info[tid][0] < SETTING_VAR["checkAcc_cnt"]);
 
-            if (isIpPost || isTempAcc) {
-                cur.classList.add("rechk");
+            if(SETTING_VAR["ServerError"] || SETTING_VAR["ServerError"]==undefined){
+                if(!isTempAcc && !isIpPost){
+                    continue;
+                }
+            }
+            else{
+                if (isIpPost || isTempAcc) {
+                    cur.classList.add("rechk");
+                }
             }
 
             let resp = await fetch(`https://gall.dcinside.com/${GLOBAL_GALLERY_TYPESTR}/board/view/?id=${$.getURLParam('id')}&no=${post_no}`, { credentials: 'include' });
@@ -4094,7 +4104,7 @@ async function getImageData(cspan) {//not image only
 
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
-            //await sleep(1000);
+            await sleep(1000);
 
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
@@ -4106,6 +4116,7 @@ async function getImageData(cspan) {//not image only
             if (e.message == 'Failed to fetch') {
                 cur.classList.add('must_parse');
                 cur.setAttribute('retry-count', Number(cur.getAttribute('retry-count'))+1);
+                await sleep(1000);
             } else {
                 console.log(e);
                 cur.classList.remove("rechk");
@@ -5292,6 +5303,7 @@ async function getMonitorData() {
         );
         reply_tbldata = reply_tbldata.map(tr => document.importNode(tr, true));
 
+        
         // 신문고 게시글 댓글 추가
         const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
 
@@ -5745,7 +5757,7 @@ async function getMonitorData() {
                 ipban_safety_stack++;
                 await sleep(7000);
             }
-            if (ipban_safety_stack > 5) {
+            if (ipban_safety_stack > 3) {
                 gallMonitorON = false;
 
                 ws.send(JSON.stringify({
