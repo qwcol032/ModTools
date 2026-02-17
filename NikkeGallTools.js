@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.5
+// @version      2.3.6
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.5";
+let toolVersion = "2.3.6";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -3878,6 +3878,7 @@ async function toggleGallMonitoring() {
 
         wsDisabled = false;
         startWebsocket();
+        await sleep(2000);
 
         clearPostList();
         /*
@@ -4077,7 +4078,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids1);
                     curvids1.onload = () => iframeResizer(curvids1);
 
-                    processIframeEl(curvids1, post_no, post_no,cur.classList.contains("already"));
+                    processIframeEl(curvids1, post_no, cur.classList.contains("already"));
                     ipImageBan(post_no);
                 }
             }
@@ -4089,7 +4090,7 @@ async function getImageData(cspan) {//not image only
                     td.appendChild(curvids2);
 
 
-                    processVideoEl(curvids2, post_no, post_no,cur.classList.contains("already"));
+                    processVideoEl(curvids2, post_no, cur.classList.contains("already"));
                     ipImageBan(post_no);
                 }
             }
@@ -4104,7 +4105,10 @@ async function getImageData(cspan) {//not image only
 
                 postdata_observer.observe(document.querySelector(`tr.ub-content.us-post[data-no="${cur.getAttribute('data-must-parse')}"]`));
             }
-            await sleep(1000);
+
+            if(SETTING_VAR["ServerError"] || SETTING_VAR["ServerError"]==undefined){
+                await sleep(1000);
+            }
 
             //협동작전 본문 차단
             processCoopText(post_str, post_no);
@@ -4690,7 +4694,7 @@ async function processCoopText(postText, post_no) {
 
     // IP 기반 차단
     if (ip.length > 2) {
-        banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+        banModule_single("협전 규칙 위반", post_no, null, 744, 1, 1);
         row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
         row.classList.add("DCMOD_REDBG");
         return;
@@ -4703,7 +4707,7 @@ async function processCoopText(postText, post_no) {
         }
 
         if (id_info[id]?.[0] < SETTING_VAR["checkAcc_cnt"]) {
-            banModule_single("협전 규칙 위반", post_no, null, 6, 1, 0);
+            banModule_single("협전 규칙 위반", post_no, null, 744, 1, 1);
             row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             row.classList.add("DCMOD_REDBG");
         } else {
@@ -5280,6 +5284,63 @@ async function banIfTop3NewestSameAuthor(rows) {
 }
 
 
+const recentTitlePatternQueue = [];
+const RECENT_PATTERN_LIMIT = 5;
+let lastAutoAddedPattern = "";
+function checkAndAutoBanTitlePattern(raw){
+
+    //제목에서 한글만남기고 제거
+    const text = String(raw ?? "").replace(/[^가-힣]/g, "");
+    if (!text || text.length < 2) return null;
+
+    //최근 5개 제목 저장
+    recentTitlePatternQueue.push(text);
+    if (recentTitlePatternQueue.length > RECENT_PATTERN_LIMIT) {
+        recentTitlePatternQueue.shift();
+    }
+
+    if (recentTitlePatternQueue.length < RECENT_PATTERN_LIMIT) return null;
+    const first = recentTitlePatternQueue[0];
+    const allSame = recentTitlePatternQueue.every(x => x === first);
+
+    //5개중에 도배제목이있다면
+    if (
+        lastAutoAddedPattern &&
+        lastAutoAddedPattern.length >= 2 &&
+        recentTitlePatternQueue.includes(lastAutoAddedPattern)
+    ) {
+        //역류기 모드 유지
+        SETTING_VAR["reverseMode"] = true;
+        return null;
+    }
+
+    //최근 5개가 모두 같지않다면
+    if (!allSame) {
+
+        //역류기 모드 중이라면 종료
+        if(SETTING_VAR["reverseMode"]){
+            lastAutoAddedPattern="";
+            SETTING_VAR["reverseMode"] = false;
+            console.log("역류기모드 종료");
+        }
+        return null;
+    }
+
+    //이미 금지 목록에 들어가있다면 생략
+    if (FUZZY_BAN_LIST.includes(first)) {
+        return null;
+    }
+
+    // 역류기 모드 실시
+    console.log("역류기모드 켜짐 / "+first);
+    SETTING_VAR["reverseMode"] = true;
+    lastAutoAddedPattern = first;
+    FUZZY_BAN_LIST.push(first);
+    FUZZY_BAN_LIST2=[];
+    for (const p of FUZZY_BAN_LIST) FUZZY_BAN_LIST2.push(extractConsonants(p));
+}
+
+
 const coop_Reg = /(?<![A-Za-z0-9])(?=[A-Z0-9]{8})(?!\d{8})([A-Z0-9]{8})(\1)*(?![A-Za-z0-9])/g; //협동작전 정규식
 
 let lastId;
@@ -5303,7 +5364,8 @@ async function getMonitorData() {
         );
         reply_tbldata = reply_tbldata.map(tr => document.importNode(tr, true));
 
-        
+
+
         // 신문고 게시글 댓글 추가
         const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
 
@@ -5495,6 +5557,15 @@ async function getMonitorData() {
             const item = post_addlist[i];
             const row = item.el;
 
+            let post_str = row.querySelector('td.gall_tit.ub-word').textContent.trim();
+            let pid = row.getAttribute('data-no')
+            let ip = row.querySelector('td.ub-writer')?.getAttribute('data-ip');
+            let id = row.querySelector('td.ub-writer')?.getAttribute('data-uid');
+            let nick = row.querySelector('td.ub-writer')?.getAttribute('data-nick');
+            let date = row.querySelector('td.gall_date')?.getAttribute('title');
+            date = date.slice(-5,-3);
+            if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
+
             //새로운 글만 tr을 생성
             if (!item.skipPrepend) {
                 let tr = document.createElement('tr');
@@ -5515,18 +5586,10 @@ async function getMonitorData() {
         `;
                 row.prepend(chkbox);
                 target.prepend(row);
+
+                //역류기 전용 도배감지기
+                checkAndAutoBanTitlePattern(post_str);
             }
-
-            let post_str = row.querySelector('td.gall_tit.ub-word').textContent.trim();
-            let pid = row.getAttribute('data-no')
-            let ip = row.querySelector('td.ub-writer')?.getAttribute('data-ip');
-            let id = row.querySelector('td.ub-writer')?.getAttribute('data-uid');
-            let nick = row.querySelector('td.ub-writer')?.getAttribute('data-nick');
-            let date = row.querySelector('td.gall_date')?.getAttribute('title');
-            date = date.slice(-5,-3);
-            if(ban_after_cnt>0) ban_after_cnt = ban_after_cnt-1;
-
-
 
             if(id.length > 2){
                 if (id_info[id] == undefined) {
@@ -5580,7 +5643,7 @@ async function getMonitorData() {
                 if (!item.skipPrepend){
                     console.log(pid+"/"+post_str);
                 }
-               
+
                 //도배감지기v2
                 if (SETTING_VAR["usePlasterban"] && !item.skipPrepend) {
                     if(ban_after_cnt == 0) preBanarr.length = 0;
