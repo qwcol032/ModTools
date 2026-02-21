@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.6
+// @version      2.3.7
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.6";
+let toolVersion = "2.3.7";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -246,7 +246,7 @@ function startWebsocket(){
 
 //갤제한
 if($.getURLParam('id')!=='gov'){
-    return;
+    //return;
 }
 
 function rebuildImageBanCache() {
@@ -5285,7 +5285,7 @@ async function banIfTop3NewestSameAuthor(rows) {
 
 
 const recentTitlePatternQueue = [];
-const RECENT_PATTERN_LIMIT = 5;
+const RECENT_PATTERN_LIMIT = 10;
 let lastAutoAddedPattern = "";
 function checkAndAutoBanTitlePattern(raw){
 
@@ -5299,11 +5299,13 @@ function checkAndAutoBanTitlePattern(raw){
         recentTitlePatternQueue.shift();
     }
 
-    if (recentTitlePatternQueue.length < RECENT_PATTERN_LIMIT) return null;
+    if (recentTitlePatternQueue.length < 5) return null;
     const first = recentTitlePatternQueue[0];
-    const allSame = recentTitlePatternQueue.every(x => x === first);
+    const sameCount = recentTitlePatternQueue.reduce((cnt, x) => {
+        return cnt + (x === first ? 1 : 0);
+    }, 0);
 
-    //5개중에 도배제목이있다면
+    //10개중에 도배제목이 하나라도 있다면
     if (
         lastAutoAddedPattern &&
         lastAutoAddedPattern.length >= 2 &&
@@ -5314,30 +5316,28 @@ function checkAndAutoBanTitlePattern(raw){
         return null;
     }
 
-    //최근 5개가 모두 같지않다면
-    if (!allSame) {
-
-        //역류기 모드 중이라면 종료
-        if(SETTING_VAR["reverseMode"]){
-            lastAutoAddedPattern="";
-            SETTING_VAR["reverseMode"] = false;
-            console.log("역류기모드 종료");
+    //같은 제목이 5개 이상이라면
+    if (sameCount>=5) {
+        //이미 금지 목록에 들어가있는지 확인
+        if (FUZZY_BAN_LIST.includes(first)) {
+            SETTING_VAR["reverseMode"] = true;
+            return null;
         }
-        return null;
+
+        // 역류기 모드 실시
+        console.log("역류기모드 켜짐 / "+first);
+        SETTING_VAR["reverseMode"] = true;
+        lastAutoAddedPattern = first;
+        FUZZY_BAN_LIST.push(first);
+        FUZZY_BAN_LIST2=[];
+        for (const p of FUZZY_BAN_LIST) FUZZY_BAN_LIST2.push(extractConsonants(p));
     }
 
-    //이미 금지 목록에 들어가있다면 생략
-    if (FUZZY_BAN_LIST.includes(first)) {
-        return null;
+    if(SETTING_VAR["reverseMode"]){
+        lastAutoAddedPattern="";
+        SETTING_VAR["reverseMode"] = false;
+        console.log("역류기모드 종료");
     }
-
-    // 역류기 모드 실시
-    console.log("역류기모드 켜짐 / "+first);
-    SETTING_VAR["reverseMode"] = true;
-    lastAutoAddedPattern = first;
-    FUZZY_BAN_LIST.push(first);
-    FUZZY_BAN_LIST2=[];
-    for (const p of FUZZY_BAN_LIST) FUZZY_BAN_LIST2.push(extractConsonants(p));
 }
 
 
@@ -5602,14 +5602,14 @@ async function getMonitorData() {
                 const matches = post_str.match(coop_Reg);
                 if(matches != null){
                     if(ip.length > 2){
-                        banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
+                        banModule_single("협전 규칙 위반", pid, null, 744, 1, 0);
                         row.classList.add('DCMOD_REDBG');
                         continue;
                     }
                     if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
                         await checkTempAccount2(id);
                         if(id_info[id][0] < SETTING_VAR["checkAcc_cnt"]){
-                            banModule_single("협전 규칙 위반", pid, null, 6, 1, 0);
+                            banModule_single("협전 규칙 위반", pid, null, 744, 1, 0);
                             row.classList.add('DCMOD_REDBG');
                             continue;
                         }
