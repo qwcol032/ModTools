@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.7
+// @version      2.3.8
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.7";
+let toolVersion = "2.3.8";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -2657,6 +2657,55 @@ async function banModule_single(reason, postNo, replyNo, bantime, delete_it, ban
         }
     });
 }
+async function banModule_single_target(reason, postNo, replyNo, bantime, delete_it, ban_ip, gallid) {
+    if (postNo == null || delete_it == null || ban_ip == null || bantime == null || !BAN_VALID_TIMES.includes(Number(bantime))) return false;
+
+    if(SETTING_VAR["reverseMode"]){
+        bantime = 6;
+    }
+
+    let banA = null;
+    let banB = null;//parent
+    if (replyNo != null) {
+        banA = [replyNo];
+        banB = postNo;
+    } else {
+        banA = [postNo];
+        banB = null;
+    }
+    let ban_reason = '?';
+    if (reason != null && reason.length > 0) {
+        ban_reason = reason;
+    }
+    let ban_ip_chk = (ban_ip == null) ? 0 : ban_ip;//없으면 IP차단 X
+    return await $.ajax({
+        type : "POST",
+        url : "/ajax/"+ get_gall_type_name() +"_manager_board_ajax/update_avoid_list",
+        data : { ci_t : get_cookie('ci_c'),
+                id: gallid,
+                nos : banA,
+                parent: banB,
+                avoid_hour : bantime,
+                avoid_reason : 0,
+                avoid_reason_txt : ban_reason,
+                del_chk : delete_it,
+                _GALLTYPE_: _GALLERY_TYPE_,
+                avoid_type_chk: ban_ip_chk},
+        dataType : 'json',
+        cache : false,
+        async : false,
+        success : function(ajaxData) {
+            if(typeof(ajaxData.msg) != 'undefined' && ajaxData.msg) {
+                console.log(ajaxData.msg);
+            } else {
+                console.log(ajaxData);
+            }
+        },
+        error : function(ajaxData) {
+            console.log('시스템 오류로 작업이 중지되었습니다. 잠시 후 다시 이용해 주세요.');
+        }
+    });
+}
 async function banModule(banPostarr) {
     let banlist = [];
     for (let cur of banPostarr) {
@@ -4891,17 +4940,17 @@ function __stripToText(memo) {
 }
 
 // ✅ isSitting=true면 data-cmt에 "S_" prefix를 붙여 별도 스트림으로 분리
-async function fetchArticleCommentRowsLikeSearch_keepDcmt(articleNo, isSitting) {
+async function fetchArticleCommentRowsLikeSearch_keepDcmt(articleNo, isSitting , isChina) {
     let gallId = $.getURLParam("id");
     let gallTypeStr = GLOBAL_GALLERY_TYPESTR;
 
-    if(isSitting){
-        gallId = "dororong";
+    if(isChina){
+        gallId = "nikkecn";
         gallTypeStr = "mgallery";
     }
-    else{
-        gallId = $.getURLParam("id");
-        gallTypeStr = GLOBAL_GALLERY_TYPESTR;
+    else if(isSitting){
+        gallId = "dororong";
+        gallTypeStr = "mgallery";
     }
 
 
@@ -5196,9 +5245,16 @@ function __extractAuthorKeyFromRow(tr) {
 // data-cmt -> { postNo, replyNo, uniq }  (S_면 null)
 function __parseDataCmt(dataCmt) {
     if (!dataCmt) return null;
-    if (dataCmt.startsWith("S_")) return null; // isSitting=false 전용
 
-    const parts = String(dataCmt).split("_");
+    let parts
+    if (dataCmt.startsWith("S_")){
+        const dcmt = dataCmt.startsWith("S_") ? dataCmt.slice(2) : dataCmt;
+        parts = String(dcmt).split("_");
+    }
+    else{
+        parts = String(dataCmt).split("_");
+    }
+
     if (parts.length < 2) return null;
 
     const postNo = parts[0];
@@ -5209,12 +5265,11 @@ function __parseDataCmt(dataCmt) {
     return { postNo, replyNo, uniq };
 }
 
-async function banIfTop3NewestSameAuthor(rows) {
+async function banIfTop3NewestSameAuthor(rows, gallid) {
     if (!Array.isArray(rows) || rows.length === 0) {
         return { checked: false, matched: false, banned: false };
     }
 
-    // 1) S_ 제외 + data-cmt 파싱 가능한 것만 모으기
     const parsed = [];
     for (const tr of rows) {
         const dcmt = tr?.getAttribute("data-cmt") || "";
@@ -5256,7 +5311,7 @@ async function banIfTop3NewestSameAuthor(rows) {
 
     // 4) 차단 조건 분기
     if (a0.type === "ip") {
-        await banModule_single("도배", target.postNo, target.replyNo, 744, 1, 1);
+        await banModule_single_target("도배", target.postNo, target.replyNo, 744, 1, 1, gallid);
         return { checked: true, matched: true, banned: true, type: "ip", id: a0.id, target };
     }
 
@@ -5276,7 +5331,7 @@ async function banIfTop3NewestSameAuthor(rows) {
     }
 
     if (accCnt < limit) {
-        await banModule_single("도배", target.postNo, target.replyNo, 744, 1, 1);
+        await banModule_single_target("도배", target.postNo, target.replyNo, 744, 1, 1, gallid);
         return { checked: true, matched: true, banned: true, type: "uid", id, target };
     }
 
@@ -5367,17 +5422,23 @@ async function getMonitorData() {
 
 
         // 신문고 게시글 댓글 추가
-        const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false);
-
-        if(SETTING_VAR["usePlasterban"]){
-            await banIfTop3NewestSameAuthor(monitorRows);
-        }
+        const monitorRows = await fetchArticleCommentRowsLikeSearch_keepDcmt(SETTING_VAR["useSinmungoCmtAlert"], false, false);
         reply_tbldata.push(...monitorRows);
 
         // 앉은문고 게시글 댓글 추가
         const SITTING_NO = 99;
-        const monitorRows2 = await fetchArticleCommentRowsLikeSearch_keepDcmt(SITTING_NO, true);
+        const monitorRows2 = await fetchArticleCommentRowsLikeSearch_keepDcmt(SITTING_NO, true, false);
         reply_tbldata.push(...monitorRows2);
+
+        // 중섭 호출벨 게시글 댓글 추가
+        const China_NO = 97;
+        const monitorRows3 = await fetchArticleCommentRowsLikeSearch_keepDcmt(China_NO, false, true);
+
+        if(SETTING_VAR["usePlasterban"]){
+            await banIfTop3NewestSameAuthor(monitorRows,'gov');
+            await banIfTop3NewestSameAuthor(monitorRows2,'dororong');
+            await banIfTop3NewestSameAuthor(monitorRows3,'nikkecn');
+        }
 
         // data-cmt 기준 중복 제거
         const seen = new Set();
