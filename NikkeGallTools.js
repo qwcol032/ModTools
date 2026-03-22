@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.3.8
+// @version      2.4.0
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.3.8";
+let toolVersion = "2.4.0";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -4178,6 +4178,54 @@ async function getImageData(cspan) {//not image only
     }
 }
 
+
+const HOMOGLYPH_MAP = {
+  // A/a 계열
+  "Ꭺ": "a", "Ａ": "a", "Α": "a", "А": "a", "ɑ": "a", "ａ": "a",
+  // B/b 계열
+  "Β": "b", "В": "b", "Ᏼ": "b", "ｂ": "b",
+  // C/c 계열
+  "Ϲ": "c", "С": "c", "Ꮯ": "c", "ⅽ": "c", "ｃ": "c",
+  // E/e 계열
+  "Ε": "e", "Е": "e", "Ꭼ": "e", "ｅ": "e",
+  // H/h 계열
+  "Η": "h", "Н": "h", "Ꮋ": "h", "ｈ": "h",
+  // I/i/l/1 계열
+  "Ι": "i", "І": "i", "Ⅰ": "i", "ｉ": "i", "ⅼ": "l", "Ｉ": "i",
+  // J/j 계열
+  "Ј": "j", "ｊ": "j",
+  // K/k 계열
+  "Κ": "k", "К": "k", "Ꮶ": "k", "ｋ": "k",
+  // M/m 계열
+  "Μ": "m", "М": "m", "Ꮇ": "m", "ｍ": "m",
+  // N/n 계열
+  "Ν": "n", "Ｎ": "n", "ｎ": "n",
+  // O/o/0 계열
+  "Ο": "o", "О": "o", "Օ": "o", "Ｏ": "o", "ｏ": "o", "〇": "o",
+  // P/p 계열
+  "Ρ": "p", "Р": "p", "Ꮲ": "p", "ｐ": "p",
+  // S/s 계열
+  "Ѕ": "s", "Ｓ": "s", "ｓ": "s",
+  // T/t 계열
+  "Τ": "t", "Т": "t", "Ｔ": "t", "ｔ": "t",
+  // V/v 계열
+  "Ꮩ": "v", "Ⅴ": "v", "Ｖ": "v", "ｖ": "v", "ν": "v",
+  // W/w 계열
+  "Ꮃ": "w", "Ｗ": "w", "ｗ": "w",
+  // X/x 계열
+  "Χ": "x", "Х": "x", "Ⅹ": "x", "ｘ": "x",
+  // Y/y 계열
+  "Υ": "y", "У": "y", "Ｙ": "y", "ｙ": "y",
+  // Z/z 계열
+  "Ζ": "z", "Ｚ": "z", "ｚ": "z",
+
+  // 숫자 비슷한 것
+  "０": "0", "１": "1", "２": "2", "３": "3", "４": "4",
+  "５": "5", "６": "6", "７": "7", "８": "8", "９": "9",
+
+  // 흔한 한글/기호 우회 혼용 예시가 있으면 여기에 계속 추가
+};
+
 //차단단어검증
 async function checkBanWord(postText, post_no, sub) {
     if(!SETTING_VAR["useWordBan"]) return;
@@ -4190,7 +4238,18 @@ async function checkBanWord(postText, post_no, sub) {
         if (id_info[id]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
     }
 
+    //보이지않는 특문사용
+    if(/[\u180E\u200B\u200C\u200D\u2060\uFEFF]/u.test(postText))
+    {
+        banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+        row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+        row.classList.add("DCMOD_REDBG");
+        return;
+    }
+
+    //띄어쓰기 제거 + 영문은 소문자로
     const replace_str = String(postText).replace(/\s+/g, "").toLowerCase();
+    //한글만 확인
     const replace_str2 = String(postText).replace(/[^가-힣]/g, "");
 
     //if(sub) console.log(post_no+"/"+postText);
@@ -4210,7 +4269,86 @@ async function checkBanWord(postText, post_no, sub) {
             return;
         }
     }
+
+    //우회유니코드사용
+    for (const ch of postText) {
+        if(HOMOGLYPH_MAP[ch]){
+            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            row.classList.add("DCMOD_REDBG");
+            return;
+        }
+    }
 }
+
+
+async function checkBanWord2(cur) {
+
+    const writerEl = cur.querySelector("td.gall_writer.ub-writer");
+    if (!writerEl) return;
+
+    const uid = writerEl.getAttribute("data-uid");
+
+    if(uid.length>2){
+        if (!id_info[uid]) await checkTempAccount(uid);
+        if (id_info[uid]?.[0] > SETTING_VAR["checkAcc_cnt"]) return;
+    }
+
+    const dcmtRaw = cur.getAttribute("data-cmt");
+    if (!dcmtRaw) return;
+
+    const dcmt = dcmtRaw.startsWith("S_") ? dcmtRaw.slice(2) : dcmtRaw;
+    const parts = dcmt.split("_");
+    const postNo = Number(parts[0]);
+    const replyNo = Number(parts[1]);
+    if (!Number.isFinite(postNo) || !Number.isFinite(replyNo)) return;
+
+    const aLink = cur.querySelector("div.sch_cmt a");
+    if (!aLink) return;
+    const bodyText = (aLink.textContent || "").trim();
+    if (!bodyText) return;
+
+    //보이지않는 특문사용
+    if(/[\u180E\u200B\u200C\u200D\u2060\uFEFF]/u.test(bodyText))
+    {
+        banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+        cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+        cur.classList.add("DCMOD_REDBG");
+        return;
+    }
+
+    //우회유니코드사용
+    for (const ch of bodyText) {
+        if(HOMOGLYPH_MAP[ch]){
+            banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+            cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            cur.classList.add("DCMOD_REDBG");
+            return;
+        }
+    }
+
+    const replace_str = String(bodyText).replace(/\s+/g, "").toLowerCase();
+    const replace_str2 = String(bodyText).replace(/[^가-힣]/g, "");
+
+    for (const w of ban_word_list) {
+        if (!w) continue;
+
+        if (replace_str.includes(w)) {
+            banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+            cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            cur.classList.add("DCMOD_REDBG");
+            return;
+        }
+        if (replace_str2.includes(w)) {
+            banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+            cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
+            cur.classList.add("DCMOD_REDBG");
+            return;
+        }
+    }
+}
+
+
 
 //유동 이미지 차단
 async function ipImageBan(post_no){
@@ -5457,6 +5595,9 @@ async function getMonitorData() {
             await runDupSpamActions(plan);
         }
 
+
+
+
         let GMD_LATEST_REPLY_SINMUNGO = Number(GM_getValue?.("GMD_LATEST_REPLY_SINMUNGO", 0) ?? 0);
 
         let reply_addlist = [];
@@ -5480,6 +5621,11 @@ async function getMonitorData() {
 
             const latestBase = isSitting ? GMD_LATEST_REPLY_SINMUNGO : GMD_LATEST_REPLY;
             if (latestBase < reply_id) {
+
+                //댓글 금지단어 체크
+                if(SETTING_VAR["useWordBan"]){
+                    checkBanWord2(cur);
+                }
 
                 // max 갱신도 분리
                 if (!isSitting) {
@@ -5850,6 +5996,7 @@ async function getMonitorData() {
             if(SETTING_VAR["useCmtZeroImageban"]){
                 if(id.legnth>2){
                     if (id_info[id][2]==0) {
+                        row.classList.replace("DCMOD_REDBG","DCMOD_YELLOWBG");
                         row.classList.add('DCMOD_YELLOWBG');
                     }
                 }
