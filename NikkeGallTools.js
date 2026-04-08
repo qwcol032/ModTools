@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.4.0
+// @version      2.4.1
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.4.0";
+let toolVersion = "2.4.1";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
@@ -1691,9 +1691,9 @@ async function process_ubwriter(nodel, noGmemo) {
                 if (ins_target != null) {
                     let aTag = ins_target.querySelector('a');
                     wid.textContent = truncateString(memo_finalstr, 24);//글작성자 크기좀넓음
-                    ins_target.insertBefore(wid, aTag.nextSibling);
+                    aTag.appendChild(wid);//insertBefore(wid, aTag.nextSibling);
                 } else {
-                    cur.appendChild(wid);//위치 잘못된거 아님
+                    cur.querySelector('a').appendChild(wid);//위치 잘못된거 아님
                 }
                 let wid2 = document.createElement('span');//툴팁
                 wid2.innerHTML = tooltipspliter(uid);
@@ -1702,7 +1702,7 @@ async function process_ubwriter(nodel, noGmemo) {
                     wid2.innerHTML += `<br /><x style="color: rgb(255, 144, 0);">⚠️[${curMemo[2]}] 갤러리에서 영구 차단됨⚠️<br />자세한 내용은 해당 갤러리의 갱차목록을 확인해 주세요.</x>`;
                 }
                 wid2.setAttribute('class', 'DCMOD_DELETABLE tooltip-text');
-                cur.appendChild(wid2);
+                cur.querySelector('a').appendChild(wid2);
                 if (curMemo[2].length != 0 ) {
                     let size = wid2.getBoundingClientRect();
                     if (size.width < 260) {
@@ -4226,6 +4226,7 @@ const HOMOGLYPH_MAP = {
   // 흔한 한글/기호 우회 혼용 예시가 있으면 여기에 계속 추가
 };
 
+
 //차단단어검증
 async function checkBanWord(postText, post_no, sub) {
     if(!SETTING_VAR["useWordBan"]) return;
@@ -4241,7 +4242,8 @@ async function checkBanWord(postText, post_no, sub) {
     //보이지않는 특문사용
     if(/[\u180E\u200B\u200C\u200D\u2060\uFEFF]/u.test(postText))
     {
-        banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+        console.log(postText);
+        banModule_single("신문고 문의(ㅈ1)", post_no, null, 744, 1, 1);
         row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
         row.classList.add("DCMOD_REDBG");
         return;
@@ -4257,13 +4259,15 @@ async function checkBanWord(postText, post_no, sub) {
         if (!w) continue;
 
         if (replace_str.includes(w)) {
-            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            banModule_single("신문고 문의(ㅈ2)", post_no, null, 744, 1, 1);
+            console.log(ban_word_list);
             row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             row.classList.add("DCMOD_REDBG");
             return;
         }
         if (replace_str2.includes(w)) {
-            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            banModule_single("신문고 문의(ㅈ2)", post_no, null, 744, 1, 1);
+            console.log(ban_word_list);
             row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             row.classList.add("DCMOD_REDBG");
             return;
@@ -4273,7 +4277,8 @@ async function checkBanWord(postText, post_no, sub) {
     //우회유니코드사용
     for (const ch of postText) {
         if(HOMOGLYPH_MAP[ch]){
-            banModule_single("신문고 문의(ㅈ)", post_no, null, 744, 1, 1);
+            console.log("check");
+            banModule_single("신문고 문의(ㅈ3)", post_no, null, 744, 1, 1);
             row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             row.classList.add("DCMOD_REDBG");
             return;
@@ -5965,13 +5970,6 @@ async function getMonitorData() {
                 //제목 유사도 검증
                 if(fastFuzzySpam(post_str)){
                     banModule_single("신문고 문의(ㄹ)", pid, null, 744, 1, 1);
-                    row.classList.add('DCMOD_REDBG');
-                    continue;
-                }
-
-                //작성자 유사도 검증
-                if(fastFuzzySpam2(nick)){
-                    banModule_single("신문고 문의(ㅁ)", pid, null, 1, 1, 0);
                     row.classList.add('DCMOD_REDBG');
                     continue;
                 }
