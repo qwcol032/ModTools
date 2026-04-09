@@ -25,7 +25,7 @@ https://github.com/philsturgeon/dbad/blob/master/LICENSE.md
 https://namu.wiki/w/DBAD%20%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4
 ------------------------------------------------------------------*/
 
-let toolVersion = "2.4.1";
+let toolVersion = "2.4.2";
 let flagAlert = true;
 let gallMonitorON = false;
 let FUZZY_BAN_LIST;
