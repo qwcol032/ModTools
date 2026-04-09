@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.4.1
+// @version      2.4.2
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -4313,25 +4313,6 @@ async function checkBanWord2(cur) {
     const bodyText = (aLink.textContent || "").trim();
     if (!bodyText) return;
 
-    //보이지않는 특문사용
-    if(/[\u180E\u200B\u200C\u200D\u2060\uFEFF]/u.test(bodyText))
-    {
-        banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
-        cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
-        cur.classList.add("DCMOD_REDBG");
-        return;
-    }
-
-    //우회유니코드사용
-    for (const ch of bodyText) {
-        if(HOMOGLYPH_MAP[ch]){
-            banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
-            cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
-            cur.classList.add("DCMOD_REDBG");
-            return;
-        }
-    }
-
     const replace_str = String(bodyText).replace(/\s+/g, "").toLowerCase();
     const replace_str2 = String(bodyText).replace(/[^가-힣]/g, "");
 
@@ -4340,12 +4321,14 @@ async function checkBanWord2(cur) {
 
         if (replace_str.includes(w)) {
             banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+            console.log(ban_word_list);
             cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             cur.classList.add("DCMOD_REDBG");
             return;
         }
         if (replace_str2.includes(w)) {
             banModule_single("신문고 문의(ㅈ)", postNo, replyNo, 744, 1, 1);
+            console.log(ban_word_list);
             cur.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
             cur.classList.add("DCMOD_REDBG");
             return;
