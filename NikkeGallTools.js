@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NikkeGallTools
 // @namespace    http://tampermonkey.net/
-// @version      2.4.2
+// @version      2.4.3
 // @description  니갤관리에 필요한 각종기능 모음(Edit by ManyongKim & G0M)
 // @author       ZENITH(int64) & E - ManyongKim, G0M
 // @noframes     true
@@ -4240,6 +4240,7 @@ async function checkBanWord(postText, post_no, sub) {
     }
 
     //보이지않는 특문사용
+    /*
     if(/[\u180E\u200B\u200C\u200D\u2060\uFEFF]/u.test(postText))
     {
         console.log(postText);
@@ -4247,7 +4248,7 @@ async function checkBanWord(postText, post_no, sub) {
         row.classList.replace("DCMOD_YELLOWBG", "DCMOD_REDBG");
         row.classList.add("DCMOD_REDBG");
         return;
-    }
+    }*/
 
     //띄어쓰기 제거 + 영문은 소문자로
     const replace_str = String(postText).replace(/\s+/g, "").toLowerCase();
